@@ -343,9 +343,9 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
     if (UseShadowRays)
     {
         float3 shadowDirection = SunDirection;
-        float3 shadowOrigin = worldPosition;
+        float3 shadowOrigin = worldPosition + normal * 1e-5f;
         RayDesc rayDesc = { shadowOrigin,
-            0.1f,
+            1e-5f,
             shadowDirection,
             FLT_MAX };
         RayPayload shadowPayload;
