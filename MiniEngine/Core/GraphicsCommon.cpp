@@ -120,7 +120,7 @@ void Graphics::InitializeCommonState(void)
     SamplerAnisoWrapDesc.MaxAnisotropy = 4;
     SamplerAnisoWrap = SamplerAnisoWrapDesc.CreateDescriptor();
 
-    SamplerShadowDesc.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+    SamplerShadowDesc.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_MIP_POINT;
     SamplerShadowDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
     SamplerShadowDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
     SamplerShadow = SamplerShadowDesc.CreateDescriptor();

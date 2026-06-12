@@ -11,6 +11,7 @@
 // Author(s):	James Stanard
 
 #include "Common.hlsli"
+#define SINGLE_SAMPLE
 #include "Lighting.hlsli"
 
 Texture2D<float3> texDiffuse		: register(t0);
