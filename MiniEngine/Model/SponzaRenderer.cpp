@@ -197,7 +197,7 @@ void Sponza::Startup( Camera& Camera )
     // Depth-only but with a depth bias and/or render only backfaces
     D3D12_RASTERIZER_DESC matchedShadowRasterizer = RasterizerShadowTwoSided;
     matchedShadowRasterizer.DepthBias = -16;
-    matchedShadowRasterizer.SlopeScaledDepthBias = 0.0f;
+    matchedShadowRasterizer.SlopeScaledDepthBias = -1.0f;
 
     m_ShadowPSO = m_DepthPSO;
     m_ShadowPSO.SetRasterizerState(matchedShadowRasterizer);
