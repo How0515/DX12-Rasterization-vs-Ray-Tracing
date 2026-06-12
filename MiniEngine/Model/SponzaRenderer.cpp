@@ -195,15 +195,19 @@ void Sponza::Startup( Camera& Camera )
     m_CutoutDepthPSO.Finalize();
 
     // Depth-only but with a depth bias and/or render only backfaces
+    D3D12_RASTERIZER_DESC matchedShadowRasterizer = RasterizerShadowTwoSided;
+    matchedShadowRasterizer.DepthBias = -1;
+    matchedShadowRasterizer.SlopeScaledDepthBias = 0.0f;
+
     m_ShadowPSO = m_DepthPSO;
-    m_ShadowPSO.SetRasterizerState(RasterizerShadowTwoSided);
+    m_ShadowPSO.SetRasterizerState(matchedShadowRasterizer);
     m_ShadowPSO.SetRenderTargetFormats(0, nullptr, g_ShadowBuffer.GetFormat());
     m_ShadowPSO.Finalize();
 
     // Shadows with alpha testing
     m_CutoutShadowPSO = m_ShadowPSO;
     m_CutoutShadowPSO.SetPixelShader(g_pDepthViewerPS, sizeof(g_pDepthViewerPS));
-    m_CutoutShadowPSO.SetRasterizerState(RasterizerShadowTwoSided);
+    m_CutoutShadowPSO.SetRasterizerState(matchedShadowRasterizer);
     m_CutoutShadowPSO.Finalize();
 
     DXGI_FORMAT formats[2] = { ColorFormat, NormalFormat };
