@@ -252,8 +252,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE /*hPrevInstance
 
     //s_EnableVSync.Decrement();
     //TargetResolution = k720p;
-    //g_DisplayWidth = 1280;
-    //g_DisplayHeight = 720;
+    g_DisplayWidth = 1280;
+    g_DisplayHeight = 720;
     GameCore::RunApplication(D3D12RaytracingMiniEngineSample(), L"D3D12RaytracingMiniEngineSample", hInstance, nCmdShow); 
     return 0;
 }
@@ -276,7 +276,7 @@ enum RaytracingMode
     RTM_DIFFUSE_WITH_SHADOWRAYS,
     RTM_REFLECTIONS,
 };
-EnumVar rayTracingMode("Application/Raytracing/RayTraceMode", RTM_DIFFUSE_WITH_SHADOWMAPS, _countof(rayTracingModes), rayTracingModes);
+EnumVar rayTracingMode("Application/Raytracing/RayTraceMode", RTM_OFF, _countof(rayTracingModes), rayTracingModes);
 
 class DescriptorHeapStack
 {
@@ -508,7 +508,7 @@ void InitializeRaytracingStateObjects(const ModelH3D &model, UINT numMeshes,
 
     D3D12_STATIC_SAMPLER_DESC &shadowSampler = staticSamplerDescs[1];
     shadowSampler = staticSamplerDescs[0];
-    shadowSampler.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+    shadowSampler.Filter =  D3D12_FILTER_COMPARISON_MIN_MAG_MIP_POINT;
     shadowSampler.ComparisonFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
     shadowSampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
     shadowSampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
@@ -955,31 +955,31 @@ void D3D12RaytracingMiniEngineSample::Startup( void )
         std::vector<UINT>(g_proceduralMaterialIDs.begin(), g_proceduralMaterialIDs.end()));
 
     m_CameraPosArrayCurrentPosition = 0;
-    
-    // Lion's head
-    m_CameraPosArray[0].position = Vector3(-1100.0f, 170.0f, -30.0f);
-    m_CameraPosArray[0].heading = 1.5707f;
-    m_CameraPosArray[0].pitch = 0.0f;
 
-    // View of columns
-    m_CameraPosArray[1].position = Vector3(299.0f, 208.0f, -202.0f);
-    m_CameraPosArray[1].heading = -3.1111f;
-    m_CameraPosArray[1].pitch = 0.5953f;
+ // 0. Shadow comparison - balanced front view
+m_CameraPosArray[0].position = Vector3(0.0f, 1.28f, -3.05f);
+m_CameraPosArray[0].heading  = 3.14159f;
+m_CameraPosArray[0].pitch    = -0.20f;
 
-    // Bottom-up view from the floor
-    m_CameraPosArray[2].position = Vector3(-1237.61f, 80.60f, -26.02f);
-    m_CameraPosArray[2].heading = -1.5707f;
-    m_CameraPosArray[2].pitch = 0.268f;
+// 1. Shadow detail - closer view, keeps box + helmet + shadow edge
+m_CameraPosArray[1].position = Vector3(-0.35f, 1.05f, -2.55f);
+m_CameraPosArray[1].heading  = 3.14159f + 0.10f;
+m_CameraPosArray[1].pitch    = -0.14f;
 
-    // Top-down view from the second floor
-    m_CameraPosArray[3].position = Vector3(-977.90f, 595.05f, -194.97f);
-    m_CameraPosArray[3].heading = -2.077f;
-    m_CameraPosArray[3].pitch =  - 0.450f;
+// 2. Reflection view - lower, floor-dominant
+m_CameraPosArray[2].position = Vector3(0.15f, 0.82f, -2.55f);
+m_CameraPosArray[2].heading  = 3.14159f - 0.05f;
+m_CameraPosArray[2].pitch    = -0.06f;
 
-    // View of corridors on the second floor
-    m_CameraPosArray[4].position = Vector3(-1463.0f, 600.0f, 394.52f);
-    m_CameraPosArray[4].heading = -1.236f;
-    m_CameraPosArray[4].pitch = 0.0f;
+// 3. GI / color bleeding view - angled but not too cropped
+m_CameraPosArray[3].position = Vector3(-0.75f, 1.10f, -2.85f);
+m_CameraPosArray[3].heading  = 3.14159f + 0.25f;
+m_CameraPosArray[3].pitch    = -0.16f;
+
+// 4. Overview / final scene comparison
+m_CameraPosArray[4].position = Vector3(0.0f, 1.65f, -3.55f);
+m_CameraPosArray[4].heading  = 3.14159f;
+m_CameraPosArray[4].pitch    = -0.32f;
 }
 
 void D3D12RaytracingMiniEngineSample::Cleanup( void )
@@ -1406,7 +1406,7 @@ void D3D12RaytracingMiniEngineSample::RenderUI(class GraphicsContext& gfxContext
     float primaryRaysPerSec = g_SceneColorBuffer.GetWidth() * g_SceneColorBuffer.GetHeight() * rollingAverageFrameRate / (1000000.0f);
     TextContext text(gfxContext);
     text.Begin();
-    text.DrawFormattedString("\nMillion Primary Rays/s: %7.3f", primaryRaysPerSec);
+    //text.DrawFormattedString("\nMillion Primary Rays/s: %7.3f", primaryRaysPerSec);
     text.End();
 }
 

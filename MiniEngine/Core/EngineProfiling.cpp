@@ -460,8 +460,7 @@ namespace EngineProfiling
         float gpuTime = NestedTimingTree::GetTotalGpuTime();
         float frameRate = 1.0f / NestedTimingTree::GetFrameDelta();
 
-        Text.DrawFormattedString( "CPU %7.3f ms, GPU %7.3f ms, %3u Hz\n",
-            cpuTime, gpuTime, (uint32_t)(frameRate + 0.5f));
+        //Text.DrawFormattedString( "CPU %7.3f ms, GPU %7.3f ms, %3u Hz\n", cpuTime, gpuTime, (uint32_t)(frameRate + 0.5f));
     }
 
     void DisplayPerfGraph( GraphicsContext& Context )

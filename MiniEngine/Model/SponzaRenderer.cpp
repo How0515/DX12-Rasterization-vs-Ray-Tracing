@@ -252,8 +252,8 @@ void Sponza::Startup( Camera& Camera )
 
     // Fixed camera for shadow/lighting comparison experiment
     Camera.SetEyeAtUp(
-        Vector3( 0.0f, 0.75f, -2.2f),   // eye: front-center, elevated
-        Vector3( 0.0f, 0.20f,  0.3f),   // target: floor center, slight depth
+        Vector3(0.0f, 0.55f, -2.0f),   // eye: front-center, elevated
+        Vector3(0.0f, 0.45f, 0.0f),   // target: floor center, slight depth
         Vector3(kYUnitVector));
 
     Lighting::CreateRandomLights(modelBounds.GetMin(), modelBounds.GetMax());
@@ -263,18 +263,18 @@ void Sponza::Startup( Camera& Camera )
         using namespace Graphics;
 
         const float kFloorY   = -0.05f;
-        const float kRoomHalf =  1.5f;
-        const float kRoomTop  =  2.0f;
-        const float kBoxXMin  =  0.25f, kBoxXMax = 0.55f;
-        const float kBoxYMin  = kFloorY, kBoxYMax = 0.55f;
-        const float kBoxZMin  = -0.80f, kBoxZMax = -0.50f;
+        const float kRoomHalf =  1.00f;
+        const float kRoomTop  =  1.45f;
+        const float kBoxXMin = 0.18f, kBoxXMax = 0.50f;
+        const float kBoxYMin = kFloorY, kBoxYMax = 0.55f;
+        const float kBoxZMin = -0.72f, kBoxZMax = -0.42f;
 
         // Surface diffuse colours (must match DiffuseHitShaderLib.hlsl's GetProceduralColor).
         struct SurfCol { float r, g, b; } cols[kNumProcSurfaces] = {
             {0.725f, 0.710f, 0.680f},   // floor
-            {0.630f, 0.065f, 0.050f},   // red wall   → 빨간색 (Cornell box 기준 유지)
-            {0.140f, 0.450f, 0.091f},   // green wall → 초록색 (Cornell box 기준 유지)
-            {0.200f, 0.350f, 0.900f},   // back wall  → 파란색
+            {0.630f, 0.060f, 0.050f},   // red wall   → 빨간색 (Cornell box 기준 유지)
+            {0.140f, 0.450f, 0.090f},   // green wall → 초록색 (Cornell box 기준 유지)
+            {0.720f, 0.710f, 0.680f},   // back wall  → 바닥과 동일
             {0.900f, 0.400f, 0.050f},   // box        → 주황색
         };
         const UINT matIDs[kNumProcSurfaces] = {100, 101, 102, 103, 104};

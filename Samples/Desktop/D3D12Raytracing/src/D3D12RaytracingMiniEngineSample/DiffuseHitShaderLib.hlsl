@@ -65,18 +65,19 @@ float GetShadow(float3 ShadowCoord)
     float d2 = Dilation * ShadowTexelSize.x * 0.875;
     float d3 = Dilation * ShadowTexelSize.x * 0.625;
     float d4 = Dilation * ShadowTexelSize.x * 0.375;
-    float result = (
-        2.0 * texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy, ShadowCoord.z) +
-        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d2, d1), ShadowCoord.z) +
-        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d1, -d2), ShadowCoord.z) +
-        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d2, -d1), ShadowCoord.z) +
-        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d1, d2), ShadowCoord.z) +
-        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d4, d3), ShadowCoord.z) +
-        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d3, -d4), ShadowCoord.z) +
-        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d4, -d3), ShadowCoord.z) +
-        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d3, d4), ShadowCoord.z)
-        ) / 10.0;
-    return result * result;
+    float result = (texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy, ShadowCoord.z));
+        //2.0 * texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy, ShadowCoord.z) +
+        //texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d2, d1), ShadowCoord.z) +
+        //texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d1, -d2), ShadowCoord.z) +
+        //texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d2, -d1), ShadowCoord.z) +
+        //texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d1, d2), ShadowCoord.z) +
+        //texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d4, d3), ShadowCoord.z) +
+        //texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d3, -d4), ShadowCoord.z) +
+        //texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d4, -d3), ShadowCoord.z) +
+        //texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d3, d4), ShadowCoord.z)
+        //) / 10.0;
+    return result;
+    //return result * result;
 }
 
 float2 GetUVAttribute(uint byteOffset)
@@ -156,9 +157,9 @@ float3 GetProceduralColor(uint matID)
     switch (matID)
     {
         case 100: return float3(0.725f, 0.710f, 0.680f); // floor
-        case 101: return float3(0.630f, 0.065f, 0.050f); // red wall   빨간색
-        case 102: return float3(0.140f, 0.450f, 0.091f); // green wall 초록색
-        case 103: return float3(0.200f, 0.350f, 0.900f); // back wall  파란색
+        case 101: return float3(0.630f, 0.060f, 0.050f); // red wall   빨간색
+        case 102: return float3(0.140f, 0.450f, 0.090f); // green wall 초록색
+        case 103: return float3(0.720f, 0.710f, 0.680f); // back wall  파란색
         case 104: return float3(0.900f, 0.400f, 0.050f); // box        주황색
         default:  return float3(1.0f, 0.0f, 0.0f);       // unknown: debug red
     }

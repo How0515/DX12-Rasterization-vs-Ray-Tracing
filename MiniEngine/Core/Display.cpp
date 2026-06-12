@@ -80,7 +80,7 @@ namespace Graphics
     const uint32_t kNumPredefinedResolutions = 6;
 
     const char* ResolutionLabels[] = { "1280x720", "1600x900", "1920x1080", "2560x1440", "3200x1800", "3840x2160" };
-    EnumVar NativeResolution("Graphics/Display/Native Resolution", k1080p, kNumPredefinedResolutions, ResolutionLabels);
+    EnumVar NativeResolution("Graphics/Display/Native Resolution", k720p, kNumPredefinedResolutions, ResolutionLabels);
 #ifdef _GAMING_DESKTOP
     // This can set the window size to common dimensions.  It's also possible for the window to take on other dimensions
     // through resizing or going full-screen.
