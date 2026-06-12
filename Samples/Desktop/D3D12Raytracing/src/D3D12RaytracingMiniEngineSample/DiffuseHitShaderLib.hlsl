@@ -33,6 +33,8 @@ Texture2D<float4> g_localNormal : register(t7);
 
 Texture2D<float4>   normals  : register(t13);
 
+static const float kShadowRayEpsilon = 1e-5f;
+
 uint3 Load3x16BitIndices(
     uint offsetBytes)
 {
@@ -209,7 +211,8 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         float shadow = 1.0f;
         if (UseShadowRays)
         {
-            RayDesc rd = { worldPos, 0.1f, SunDirection, FLT_MAX };
+            float3 shadowOrigin = worldPos + normal * kShadowRayEpsilon;
+            RayDesc rd = { shadowOrigin, kShadowRayEpsilon, SunDirection, FLT_MAX };
             RayPayload sp; sp.SkipShading = true; sp.RayHitT = FLT_MAX;
             TraceRay(g_accel, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, ~0, 0, 1, 0, rd, sp);
             if (sp.RayHitT < FLT_MAX) shadow = 0.0f;
@@ -343,9 +346,9 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
     if (UseShadowRays)
     {
         float3 shadowDirection = SunDirection;
-        float3 shadowOrigin = worldPosition + normal * 1e-5f;
+        float3 shadowOrigin = worldPosition + normal * kShadowRayEpsilon;
         RayDesc rayDesc = { shadowOrigin,
-            1e-5f,
+            kShadowRayEpsilon,
             shadowDirection,
             FLT_MAX };
         RayPayload shadowPayload;
