@@ -161,8 +161,8 @@ void TemporalEffects::ResolveImage( CommandContext& BaseContext )
     uint32_t Dst = Src ^ 1;
 
     {
-        ApplyTemporalAA(Context);
-        SharpenImage(Context, g_TemporalColor[Dst]);
+        //ApplyTemporalAA(Context);
+        //SharpenImage(Context, g_TemporalColor[Dst]);
     }
 }
 
