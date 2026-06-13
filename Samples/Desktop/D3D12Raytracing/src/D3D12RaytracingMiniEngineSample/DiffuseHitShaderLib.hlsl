@@ -34,13 +34,13 @@ Texture2D<float4> g_localNormal : register(t7);
 Texture2D<float4>   normals  : register(t13);
 
 static const float kShadowRayEpsilon = 1e-5f;
-static const uint kAreaLightSampleCount = 4;
+static const uint kAreaLightSampleCount = 16;
 static const float2 kAreaLightSampleOffsets[kAreaLightSampleCount] =
 {
-    float2(-0.18f, -0.12f),
-    float2( 0.18f, -0.12f),
-    float2(-0.18f,  0.12f),
-    float2( 0.18f,  0.12f)
+    float2(-0.18f, -0.12f), float2(-0.06f, -0.12f), float2( 0.06f, -0.12f), float2( 0.18f, -0.12f),
+    float2(-0.18f, -0.04f), float2(-0.06f, -0.04f), float2( 0.06f, -0.04f), float2( 0.18f, -0.04f),
+    float2(-0.18f,  0.04f), float2(-0.06f,  0.04f), float2( 0.06f,  0.04f), float2( 0.18f,  0.04f),
+    float2(-0.18f,  0.12f), float2(-0.06f,  0.12f), float2( 0.06f,  0.12f), float2( 0.18f,  0.12f)
 };
 
 uint3 Load3x16BitIndices(
