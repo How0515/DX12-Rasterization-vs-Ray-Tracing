@@ -252,12 +252,16 @@ void Sponza::Startup( Camera& Camera )
     const float modelThickness = (float)modelDimensions.GetZ();
     const float modelHalfHeight = (float)modelDimensions.GetY() * 0.5f;
 
-    m_ModelTransform = Matrix4(AffineTransform::MakeYRotation(XM_PI));
+    // Cornell-box composition: from the camera, the helmet sits at the back-left.
+    m_ModelTransform = Matrix4(AffineTransform(
+        Matrix3::MakeYRotation(XM_PI),
+        Vector3(0.38f, 0.0f, 0.30f)));
 
-    // Fixed camera for shadow/lighting comparison experiment
+    // Initial Cornell-box view.  ModelViewer applies the matching preset after
+    // creating its camera controller.
     Camera.SetEyeAtUp(
-        Vector3(0.0f, 0.55f, -2.0f),   // eye: front-center, elevated
-        Vector3(0.0f, 0.45f, 0.0f),   // target: floor center, slight depth
+        Vector3(0.0f, 0.70f, -2.65f),
+        Vector3(0.0f, 0.70f, 0.0f),
         Vector3(kYUnitVector));
 
     Lighting::CreateRandomLights(modelBounds.GetMin(), modelBounds.GetMax());
@@ -271,9 +275,10 @@ void Sponza::Startup( Camera& Camera )
         const float kRoomTop  =  1.45f;
         const float kLightHalfX = 0.28f, kLightHalfZ = 0.20f;
         const float kLightY = kRoomTop - 0.005f;
-        const float kBoxXMin = 0.18f, kBoxXMax = 0.50f;
-        const float kBoxYMin = kFloorY, kBoxYMax = 0.55f;
-        const float kBoxZMin = -0.72f, kBoxZMax = -0.42f;
+        // From the camera, this shorter box sits at the front-right.
+        const float kBoxXMin = -0.65f, kBoxXMax = -0.25f;
+        const float kBoxYMin = kFloorY, kBoxYMax = 0.52f;
+        const float kBoxZMin = -0.58f, kBoxZMax = -0.18f;
 
         // Surface diffuse colours (must match DiffuseHitShaderLib.hlsl's GetProceduralColor).
         struct SurfCol { float r, g, b; } cols[kNumProcSurfaces] = {

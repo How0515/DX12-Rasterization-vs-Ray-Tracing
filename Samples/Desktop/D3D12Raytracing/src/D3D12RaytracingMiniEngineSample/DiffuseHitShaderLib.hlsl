@@ -67,17 +67,17 @@ float GetShadow(float3 ShadowCoord)
     float d2 = Dilation * ShadowTexelSize.x * 0.875;
     float d3 = Dilation * ShadowTexelSize.x * 0.625;
     float d4 = Dilation * ShadowTexelSize.x * 0.375;
-    float result = (texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy, ShadowCoord.z));
-        //2.0 * texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy, ShadowCoord.z) +
-        //texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d2, d1), ShadowCoord.z) +
-        //texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d1, -d2), ShadowCoord.z) +
-        //texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d2, -d1), ShadowCoord.z) +
-        //texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d1, d2), ShadowCoord.z) +
-        //texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d4, d3), ShadowCoord.z) +
-        //texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d3, -d4), ShadowCoord.z) +
-        //texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d4, -d3), ShadowCoord.z) +
-        //texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d3, d4), ShadowCoord.z)
-        //) / 10.0;
+    float result = (
+        2.0 * texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy, ShadowCoord.z) +
+        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d2, d1), ShadowCoord.z) +
+        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d1, -d2), ShadowCoord.z) +
+        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d2, -d1), ShadowCoord.z) +
+        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d1, d2), ShadowCoord.z) +
+        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d4, d3), ShadowCoord.z) +
+        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d3, -d4), ShadowCoord.z) +
+        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d4, -d3), ShadowCoord.z) +
+        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d3, d4), ShadowCoord.z)
+        ) / 10.0;
     return result;
     //return result * result;
 }
@@ -126,6 +126,36 @@ float3 ApplyLightCommon(
     return nDotL * lightColor * (diffuseColor + specularFactor * specularColor);
 }
 
+float TraceAreaLightHardShadow(float3 worldPos, float3 normal)
+{
+    if (!UseShadowRays)
+        return 1.0f;
+
+    float3 toLight = PointLightPos.xyz - worldPos;
+    float distanceToLight = length(toLight);
+    if (distanceToLight <= 2.0f * kShadowRayEpsilon)
+        return 1.0f;
+
+    RayDesc shadowRay;
+    shadowRay.Origin = worldPos + normal * kShadowRayEpsilon;
+    shadowRay.TMin = kShadowRayEpsilon;
+    shadowRay.Direction = toLight / distanceToLight;
+    shadowRay.TMax = distanceToLight - kShadowRayEpsilon;
+
+    RayPayload shadowPayload = { true, FLT_MAX };
+    TraceRay(
+        g_accel,
+        RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,
+        1,
+        0,
+        1,
+        0,
+        shadowRay,
+        shadowPayload);
+
+    return shadowPayload.RayHitT < FLT_MAX ? 0.0f : 1.0f;
+}
+
 float3 ApplyRectAreaLightApprox(
     float3 diffuseColor,
     float3 specularColor,
@@ -135,6 +165,10 @@ float3 ApplyRectAreaLightApprox(
     float3 viewDir,
     float3 worldPos)
 {
+    float visibility = TraceAreaLightHardShadow(worldPos, normal);
+    if (visibility == 0.0f)
+        return 0.0f;
+
     const float2 sampleOffsets[4] =
     {
         float2(-0.18f, -0.12f),
@@ -157,7 +191,7 @@ float3 ApplyRectAreaLightApprox(
             diffuseColor, specularColor, specularMask, gloss,
             normal, viewDir, toLight * invDist, PointLightColor.xyz * 0.25f);
     }
-    return result;
+    return visibility * result;
 }
 
 float3 RayPlaneIntersection(float3 planeOrigin, float3 planeNormal, float3 rayOrigin, float3 rayDirection)

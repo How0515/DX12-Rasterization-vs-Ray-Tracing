@@ -727,6 +727,7 @@ void D3D12RaytracingMiniEngineSample::Startup( void )
     Sponza::Startup(m_Camera);
 
     m_Camera.SetZRange( 1.0f, 10000.0f );
+    m_Camera.SetFOV(XM_PI * 52.0f / 180.0f);
     m_CameraController.reset(new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector)));
 
 
@@ -954,17 +955,17 @@ void D3D12RaytracingMiniEngineSample::Startup( void )
     InitializeRaytracingStateObjects(model, numMeshes,
         std::vector<UINT>(g_proceduralMaterialIDs.begin(), g_proceduralMaterialIDs.end()));
 
-    m_CameraPosArrayCurrentPosition = 0;
+    m_CameraPosArrayCurrentPosition = 1;
 
- // 0. Shadow comparison - balanced front view
-m_CameraPosArray[0].position = Vector3(0.0f, 1.28f, -3.05f);
+// 0. Cornell-box front view - light panel, objects, and floor are all visible.
+m_CameraPosArray[0].position = Vector3(0.0f, 0.70f, -2.65f);
 m_CameraPosArray[0].heading  = 3.14159f;
-m_CameraPosArray[0].pitch    = -0.20f;
+m_CameraPosArray[0].pitch    = 0.0f;
 
-// 1. Shadow detail - closer view, keeps box + helmet + shadow edge
-m_CameraPosArray[1].position = Vector3(-0.35f, 1.05f, -2.55f);
-m_CameraPosArray[1].heading  = 3.14159f + 0.10f;
-m_CameraPosArray[1].pitch    = -0.14f;
+// 1. Slightly elevated shadow-detail view.
+m_CameraPosArray[1].position = Vector3(0.0f, 0.88f, -2.35f);
+m_CameraPosArray[1].heading  = 3.14159f;
+m_CameraPosArray[1].pitch    = -0.10f;
 
 // 2. Reflection view - lower, floor-dominant
 m_CameraPosArray[2].position = Vector3(0.15f, 0.82f, -2.55f);
@@ -980,6 +981,8 @@ m_CameraPosArray[3].pitch    = -0.16f;
 m_CameraPosArray[4].position = Vector3(0.0f, 1.65f, -3.55f);
 m_CameraPosArray[4].heading  = 3.14159f;
 m_CameraPosArray[4].pitch    = -0.32f;
+
+SetCameraToPredefinedPosition(1);
 }
 
 void D3D12RaytracingMiniEngineSample::Cleanup( void )
