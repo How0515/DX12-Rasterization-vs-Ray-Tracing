@@ -34,6 +34,14 @@ Texture2D<float4> g_localNormal : register(t7);
 Texture2D<float4>   normals  : register(t13);
 
 static const float kShadowRayEpsilon = 1e-5f;
+static const uint kAreaLightSampleCount = 4;
+static const float2 kAreaLightSampleOffsets[kAreaLightSampleCount] =
+{
+    float2(-0.18f, -0.12f),
+    float2( 0.18f, -0.12f),
+    float2(-0.18f,  0.12f),
+    float2( 0.18f,  0.12f)
+};
 
 uint3 Load3x16BitIndices(
     uint offsetBytes)
@@ -126,12 +134,12 @@ float3 ApplyLightCommon(
     return nDotL * lightColor * (diffuseColor + specularFactor * specularColor);
 }
 
-float TraceAreaLightHardShadow(float3 worldPos, float3 normal)
+float TraceAreaLightSampleVisibility(float3 worldPos, float3 normal, float3 samplePos)
 {
     if (!UseShadowRays)
         return 1.0f;
 
-    float3 toLight = PointLightPos.xyz - worldPos;
+    float3 toLight = samplePos - worldPos;
     float distanceToLight = length(toLight);
     if (distanceToLight <= 2.0f * kShadowRayEpsilon)
         return 1.0f;
@@ -165,33 +173,22 @@ float3 ApplyRectAreaLightApprox(
     float3 viewDir,
     float3 worldPos)
 {
-    float visibility = TraceAreaLightHardShadow(worldPos, normal);
-    if (visibility == 0.0f)
-        return 0.0f;
-
-    const float2 sampleOffsets[4] =
-    {
-        float2(-0.18f, -0.12f),
-        float2( 0.18f, -0.12f),
-        float2(-0.18f,  0.12f),
-        float2( 0.18f,  0.12f)
-    };
-
     float3 result = 0.0f;
     [unroll]
-    for (uint i = 0; i < 4; ++i)
+    for (uint i = 0; i < kAreaLightSampleCount; ++i)
     {
-        float3 samplePos = PointLightPos.xyz + float3(sampleOffsets[i].x, 0.0f, sampleOffsets[i].y);
+        float3 samplePos = PointLightPos.xyz + float3(kAreaLightSampleOffsets[i].x, 0.0f, kAreaLightSampleOffsets[i].y);
+        float visibility = TraceAreaLightSampleVisibility(worldPos, normal, samplePos);
         float3 toLight = samplePos - worldPos;
         float distSq = dot(toLight, toLight);
         float invDist = rsqrt(distSq);
         float distFalloff = 9.0f * (invDist * invDist);
         distFalloff = max(0, distFalloff - rsqrt(distFalloff));
-        result += distFalloff * ApplyLightCommon(
+        result += visibility * distFalloff * ApplyLightCommon(
             diffuseColor, specularColor, specularMask, gloss,
-            normal, viewDir, toLight * invDist, PointLightColor.xyz * 0.25f);
+            normal, viewDir, toLight * invDist, PointLightColor.xyz / kAreaLightSampleCount);
     }
-    return visibility * result;
+    return result;
 }
 
 float3 RayPlaneIntersection(float3 planeOrigin, float3 planeNormal, float3 rayOrigin, float3 rayDirection)
