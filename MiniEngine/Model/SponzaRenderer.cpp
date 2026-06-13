@@ -63,7 +63,7 @@ namespace Sponza
     Vector3 m_PointLightPos;
     Vector3 m_PointLightColor;
 
-    ExpVar m_AmbientIntensity("Sponza/Lighting/Ambient Intensity", 0.08f, -16.0f, 16.0f, 0.1f);
+    ExpVar m_AmbientIntensity("Sponza/Lighting/Ambient Intensity", 0.0f, -16.0f, 16.0f, 0.1f);
     ExpVar m_SunLightIntensity("Sponza/Lighting/Sun Light Intensity", 0.0f, 0.0f, 16.0f, 0.1f);
     NumVar m_SunOrientation("Sponza/Lighting/Sun Orientation", -1.0f, -100.0f, 100.0f, 0.1f );
     NumVar m_SunInclination("Sponza/Lighting/Sun Inclination", 0.45f, 0.0f, 1.0f, 0.01f );
