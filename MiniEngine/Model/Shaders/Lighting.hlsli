@@ -182,6 +182,37 @@ float3 ApplyPointLight(
         );
 }
 
+float3 ApplyRectAreaLightApprox(
+    float3 diffuseColor,
+    float3 specularColor,
+    float specularMask,
+    float gloss,
+    float3 normal,
+    float3 viewDir,
+    float3 worldPos,
+    float3 lightCenter,
+    float3 lightColor)
+{
+    const float2 sampleOffsets[4] =
+    {
+        float2(-0.18f, -0.12f),
+        float2( 0.18f, -0.12f),
+        float2(-0.18f,  0.12f),
+        float2( 0.18f,  0.12f)
+    };
+
+    float3 result = 0.0f;
+    [unroll]
+    for (uint i = 0; i < 4; ++i)
+    {
+        float3 samplePos = lightCenter + float3(sampleOffsets[i].x, 0.0f, sampleOffsets[i].y);
+        result += ApplyPointLight(
+            diffuseColor, specularColor, specularMask, gloss, normal, viewDir,
+            worldPos, samplePos, 9.0f, lightColor * 0.25f);
+    }
+    return result;
+}
+
 float3 ApplyConeLight(
     float3	diffuseColor,	// Diffuse albedo
     float3	specularColor,	// Specular albedo

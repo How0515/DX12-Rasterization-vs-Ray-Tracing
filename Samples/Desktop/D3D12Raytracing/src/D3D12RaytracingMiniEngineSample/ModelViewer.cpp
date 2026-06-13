@@ -914,7 +914,7 @@ void D3D12RaytracingMiniEngineSample::Startup( void )
         inst.AccelerationStructure             = g_proceduralBLAS[j]->GetGPUVirtualAddress();
         inst.Flags                             = 0;
         inst.InstanceID                        = 0;
-        inst.InstanceMask                      = 1;
+        inst.InstanceMask                      = procDescs[j].materialID == 106 ? 2 : 1;
         inst.InstanceContributionToHitGroupIndex = numMeshes + j;
     }
 
@@ -1078,10 +1078,8 @@ void D3D12RaytracingMiniEngineSample::RenderScene(void)
         rayTracingMode == RTM_DIFFUSE_WITH_SHADOWRAYS ||
         rayTracingMode == RTM_TRAVERSAL;
         
-    const bool skipShadowMap = 
-        rayTracingMode == RTM_DIFFUSE_WITH_SHADOWRAYS ||
-        rayTracingMode == RTM_TRAVERSAL ||
-        rayTracingMode == RTM_SSR;
+    // Directional lighting is disabled, so its orthographic shadow map is not needed.
+    const bool skipShadowMap = true;
 
     GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Render");
 
@@ -1427,7 +1425,7 @@ void D3D12RaytracingMiniEngineSample::Raytrace(class GraphicsContext& gfxContext
         break;
 
     case RTM_SHADOWS:
-        RaytraceShadows(gfxContext, m_Camera, g_SceneColorBuffer, g_SceneDepthBuffer);
+        // This mode visualized directional-light shadow rays, which are disabled.
         break;
 
     case RTM_DIFFUSE_WITH_SHADOWMAPS:

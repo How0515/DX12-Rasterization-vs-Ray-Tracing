@@ -126,6 +126,40 @@ float3 ApplyLightCommon(
     return nDotL * lightColor * (diffuseColor + specularFactor * specularColor);
 }
 
+float3 ApplyRectAreaLightApprox(
+    float3 diffuseColor,
+    float3 specularColor,
+    float specularMask,
+    float gloss,
+    float3 normal,
+    float3 viewDir,
+    float3 worldPos)
+{
+    const float2 sampleOffsets[4] =
+    {
+        float2(-0.18f, -0.12f),
+        float2( 0.18f, -0.12f),
+        float2(-0.18f,  0.12f),
+        float2( 0.18f,  0.12f)
+    };
+
+    float3 result = 0.0f;
+    [unroll]
+    for (uint i = 0; i < 4; ++i)
+    {
+        float3 samplePos = PointLightPos.xyz + float3(sampleOffsets[i].x, 0.0f, sampleOffsets[i].y);
+        float3 toLight = samplePos - worldPos;
+        float distSq = dot(toLight, toLight);
+        float invDist = rsqrt(distSq);
+        float distFalloff = 9.0f * (invDist * invDist);
+        distFalloff = max(0, distFalloff - rsqrt(distFalloff));
+        result += distFalloff * ApplyLightCommon(
+            diffuseColor, specularColor, specularMask, gloss,
+            normal, viewDir, toLight * invDist, PointLightColor.xyz * 0.25f);
+    }
+    return result;
+}
+
 float3 RayPlaneIntersection(float3 planeOrigin, float3 planeNormal, float3 rayOrigin, float3 rayDirection)
 {
     float t = dot(-planeNormal, rayOrigin - planeOrigin) / dot(planeNormal, rayDirection);
@@ -163,6 +197,8 @@ float3 GetProceduralColor(uint matID)
         case 102: return float3(0.140f, 0.450f, 0.090f); // green wall 초록색
         case 103: return float3(0.720f, 0.710f, 0.680f); // back wall  파란색
         case 104: return float3(0.900f, 0.400f, 0.050f); // box        주황색
+        case 105: return float3(0.720f, 0.710f, 0.680f); // ceiling
+        case 106: return float3(1.000f, 0.950f, 0.800f); // area light panel
         default:  return float3(1.0f, 0.0f, 0.0f);       // unknown: debug red
     }
 }
@@ -175,6 +211,8 @@ float3 GetProceduralNormal(uint matID, uint primIdx)
     if (matID == 101) return float3( 1,  0,  0);  // red wall
     if (matID == 102) return float3(-1,  0,  0);  // green wall
     if (matID == 103) return float3( 0,  0, -1);  // back wall
+    if (matID == 105) return float3( 0, -1,  0);  // ceiling
+    if (matID == 106) return float3( 0, -1,  0);  // area light panel
     if (matID == 104)
     {
         if (primIdx <  2) return float3( 0,  1,  0);  // top
@@ -208,36 +246,16 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         float3 normal      = GetProceduralNormal(materialID, PrimitiveIndex());
         float3 viewDir     = normalize(-WorldRayDirection());
 
-        float shadow = 1.0f;
-        if (UseShadowRays)
+        if (materialID == 106)
         {
-            float3 shadowOrigin = worldPos + normal * kShadowRayEpsilon;
-            RayDesc rd = { shadowOrigin, kShadowRayEpsilon, SunDirection, FLT_MAX };
-            RayPayload sp; sp.SkipShading = true; sp.RayHitT = FLT_MAX;
-            TraceRay(g_accel, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, ~0, 0, 1, 0, rd, sp);
-            if (sp.RayHitT < FLT_MAX) shadow = 0.0f;
-        }
-        else
-        {
-            float4 sc = mul(ModelToShadow, float4(worldPos, 1.0f));
-            shadow = GetShadow(sc.xyz);
+            g_screenOutput[DispatchRaysIndex().xy] = float4(diffuse * 0.6f, 1.0f);
+            return;
         }
 
         float3 out3 = AmbientColor * diffuse * texSSAO[DispatchRaysIndex().xy];
-        out3 += shadow * ApplyLightCommon(
+        out3 += ApplyRectAreaLightApprox(
             diffuse, float3(0.56f, 0.56f, 0.56f), 0.0f, 128.0f,
-            normal, viewDir, SunDirection, SunColor);
-
-        {
-            float3 toLight = PointLightPos.xyz - worldPos;
-            float distSq = dot(toLight, toLight);
-            float invDist = rsqrt(distSq);
-            float distFalloff = 9.0f * (invDist * invDist);
-            distFalloff = max(0, distFalloff - rsqrt(distFalloff));
-            out3 += distFalloff * ApplyLightCommon(
-                diffuse, float3(0.56f, 0.56f, 0.56f), 0.0f, 128.0f,
-                normal, viewDir, toLight * invDist, PointLightColor.xyz);
-        }
+            normal, viewDir, worldPos);
 
         if (IsReflection)
             out3 = g_screenOutput[DispatchRaysIndex().xy].rgb + out3;
@@ -342,53 +360,11 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
     
     float3 outputColor = AmbientColor * diffuseColor * texSSAO[DispatchRaysIndex().xy];
 
-    float shadow = 1.0;
-    if (UseShadowRays)
-    {
-        float3 shadowDirection = SunDirection;
-        float3 shadowOrigin = worldPosition + normal * kShadowRayEpsilon;
-        RayDesc rayDesc = { shadowOrigin,
-            kShadowRayEpsilon,
-            shadowDirection,
-            FLT_MAX };
-        RayPayload shadowPayload;
-        shadowPayload.SkipShading = true;
-        shadowPayload.RayHitT = FLT_MAX;
-        TraceRay(g_accel, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,~0,0,1,0,rayDesc,shadowPayload);
-        if (shadowPayload.RayHitT < FLT_MAX)
-        {
-            shadow = 0.0;
-        }
-    }
-    else
-    {
-        // TODO: This could be pre-calculated once per vertex if this mul per pixel was a concern
-        float4 shadowCoord = mul(ModelToShadow, float4(worldPosition, 1.0f));
-        shadow = GetShadow(shadowCoord.xyz);
-    }
-    
     const float3 viewDir = normalize(-WorldRayDirection());
 
-    outputColor +=  shadow * ApplyLightCommon(
-        diffuseColor,
-        specularAlbedo,
-        specularMask,
-        gloss,
-        normal,
-        viewDir,
-        SunDirection,
-        SunColor);
-
-    {
-        float3 toLight = PointLightPos.xyz - worldPosition;
-        float distSq = dot(toLight, toLight);
-        float invDist = rsqrt(distSq);
-        float distFalloff = 9.0f * (invDist * invDist);
-        distFalloff = max(0, distFalloff - rsqrt(distFalloff));
-        outputColor += distFalloff * ApplyLightCommon(
-            diffuseColor, specularAlbedo, specularMask, gloss,
-            normal, viewDir, toLight * invDist, PointLightColor.xyz);
-    }
+    outputColor += ApplyRectAreaLightApprox(
+        diffuseColor, specularAlbedo, specularMask, gloss,
+        normal, viewDir, worldPosition);
 
     // TODO: Should be passed in via material info
     if (IsReflection)

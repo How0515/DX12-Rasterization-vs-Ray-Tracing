@@ -16,7 +16,7 @@
 
 Texture2D<float3> texDiffuse		: register(t0);
 Texture2D<float3> texSpecular		: register(t1);
-//Texture2D<float4> texEmissive		: register(t2);
+Texture2D<float4> texEmissive		: register(t2);
 Texture2D<float3> texNormal			: register(t3);
 //Texture2D<float4> texLightmap		: register(t4);
 //Texture2D<float4> texReflection	: register(t5);
@@ -68,10 +68,11 @@ MRT main(VSOutput vsOutput)
     float3 specularAlbedo = float3( 0.56, 0.56, 0.56 );
     float specularMask = SAMPLE_TEX(texSpecular).g;
     float3 viewDir = normalize(vsOutput.viewDir);
-    colorSum += ApplyDirectionalLight( diffuseAlbedo, specularAlbedo, specularMask, gloss, normal, viewDir, SunDirection, SunColor, vsOutput.shadowCoord, texShadow );
+    // Directional light is disabled; the ceiling area-light approximation is used instead.
 
-    colorSum += ApplyPointLight( diffuseAlbedo, specularAlbedo, specularMask, gloss, normal, viewDir,
-        vsOutput.worldPos, PointLightPos.xyz, 9.0f, PointLightColor.xyz );
+    colorSum += ApplyRectAreaLightApprox( diffuseAlbedo, specularAlbedo, specularMask, gloss, normal, viewDir,
+        vsOutput.worldPos, PointLightPos.xyz, PointLightColor.xyz );
+    colorSum += SAMPLE_TEX(texEmissive).rgb * 0.6f;
 
 	// ShadeLights(colorSum, pixelPos,
 	// 	diffuseAlbedo,

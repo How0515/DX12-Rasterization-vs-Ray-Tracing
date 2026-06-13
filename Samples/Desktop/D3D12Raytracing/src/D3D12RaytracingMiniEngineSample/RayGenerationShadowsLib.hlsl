@@ -44,7 +44,7 @@ void RayGen()
         direction,
         FLT_MAX };
     RayPayload payload = { false, FLT_MAX };
-    TraceRay(g_accel, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, ~0,0,1,0, rayDesc, payload);
+    TraceRay(g_accel, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 1,0,1,0, rayDesc, payload);
 
     if (payload.RayHitT < FLT_MAX)
     {

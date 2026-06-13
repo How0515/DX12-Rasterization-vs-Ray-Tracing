@@ -64,20 +64,19 @@ namespace Sponza
     Vector3 m_PointLightColor;
 
     ExpVar m_AmbientIntensity("Sponza/Lighting/Ambient Intensity", 0.08f, -16.0f, 16.0f, 0.1f);
-    ExpVar m_SunLightIntensity("Sponza/Lighting/Sun Light Intensity", 1.5f, 0.0f, 16.0f, 0.1f);
+    ExpVar m_SunLightIntensity("Sponza/Lighting/Sun Light Intensity", 0.0f, 0.0f, 16.0f, 0.1f);
     NumVar m_SunOrientation("Sponza/Lighting/Sun Orientation", -1.0f, -100.0f, 100.0f, 0.1f );
     NumVar m_SunInclination("Sponza/Lighting/Sun Inclination", 0.45f, 0.0f, 1.0f, 0.01f );
     NumVar ShadowDimX("Sponza/Lighting/Shadow Dim X", 5.0f, 0.5f, 20.0f, 0.25f);
     NumVar ShadowDimY("Sponza/Lighting/Shadow Dim Y", 5.0f, 0.5f, 20.0f, 0.25f);
     NumVar ShadowDimZ("Sponza/Lighting/Shadow Dim Z", 14.0f, 1.0f, 40.0f, 0.5f);
 
-    NumVar m_PointLightSpeed("Sponza/Lighting/Point Light Speed",     0.8f, 0.0f, 5.0f,  0.1f);
-    NumVar m_PointLightOrbit("Sponza/Lighting/Point Light Orbit",     0.9f, 0.0f, 1.4f,  0.05f);
-    NumVar m_PointLightHeight("Sponza/Lighting/Point Light Height",   0.75f, 0.0f, 2.0f,  0.05f);
-    NumVar m_PointLightIntensity("Sponza/Lighting/Point Light Intensity", 0.0f, 0.0f, 10.0f, 0.1f);
+    NumVar m_PointLightHeight("Sponza/Lighting/Area Light Height",   1.40f, 0.0f, 2.0f,  0.05f);
+    NumVar m_PointLightIntensity("Sponza/Lighting/Area Light Intensity", 0.2f, 0.0f, 10.0f, 0.1f);
 
-    // ---- Procedural scene geometry (floor, walls, box) ----------------------
-    static const UINT kNumProcSurfaces = 5;
+    // ---- Procedural scene geometry (floor, walls, box, ceiling, light) -----
+    static const UINT kNumProcSurfaces = 7;
+    static const UINT kAreaLightMaterialID = 106;
 
     struct ProcSurface
     {
@@ -91,6 +90,7 @@ namespace Sponza
 
     ProcSurface            m_procSurfaces[kNumProcSurfaces];
     ComPtr<ID3D12Resource> m_procDiffuseTextures[kNumProcSurfaces];
+    ComPtr<ID3D12Resource> m_procEmissiveTextures[kNumProcSurfaces];
 }
 
 // Creates a 1×1 R8G8B8A8_UNORM texture with a solid colour and writes its SRV.
@@ -269,6 +269,8 @@ void Sponza::Startup( Camera& Camera )
         const float kFloorY   = -0.05f;
         const float kRoomHalf =  1.00f;
         const float kRoomTop  =  1.45f;
+        const float kLightHalfX = 0.28f, kLightHalfZ = 0.20f;
+        const float kLightY = kRoomTop - 0.005f;
         const float kBoxXMin = 0.18f, kBoxXMax = 0.50f;
         const float kBoxYMin = kFloorY, kBoxYMax = 0.55f;
         const float kBoxZMin = -0.72f, kBoxZMax = -0.42f;
@@ -280,8 +282,10 @@ void Sponza::Startup( Camera& Camera )
             {0.140f, 0.450f, 0.090f},   // green wall → 초록색 (Cornell box 기준 유지)
             {0.720f, 0.710f, 0.680f},   // back wall  → 바닥과 동일
             {0.900f, 0.400f, 0.050f},   // box        → 주황색
+            {0.720f, 0.710f, 0.680f},   // ceiling
+            {1.000f, 0.950f, 0.800f},   // area light panel
         };
-        const UINT matIDs[kNumProcSurfaces] = {100, 101, 102, 103, 104};
+        const UINT matIDs[kNumProcSurfaces] = {100, 101, 102, 103, 104, 105, kAreaLightMaterialID};
 
         // FillQuad: writes 4 vertices (pos+normal+tangent+bitangent) and 6 indices.
         // Indices are CCW to match MiniEngine's RasterizerDefault (FrontCounterClockwise=TRUE).
@@ -374,6 +378,37 @@ void Sponza::Startup( Camera& Camera )
           m_procSurfaces[4].vb.Create(L"ProcBox VB", 24, sizeof(SceneVertex), tmpV);
           m_procSurfaces[4].ib.Create(L"ProcBox IB", 36, sizeof(uint16_t),    tmpI); }
 
+        // 5 - Ceiling with a rectangular opening for the area-light panel.
+        { memset(tmpV, 0, sizeof(tmpV)); memset(tmpI, 0, sizeof(tmpI));
+          { const float p0[3]={-kRoomHalf,kRoomTop,-kRoomHalf}, p1[3]={-kRoomHalf,kRoomTop, kRoomHalf},
+                        p2[3]={-kLightHalfX,kRoomTop, kRoomHalf}, p3[3]={-kLightHalfX,kRoomTop,-kRoomHalf};
+            const float n[3]={0,-1,0}, t[3]={1,0,0}, bt[3]={0,0,1};
+            FillQuad(tmpV+0, tmpI+0, 0, p0,p1,p2,p3, n,t,bt); }
+          { const float p0[3]={ kLightHalfX,kRoomTop,-kRoomHalf}, p1[3]={ kLightHalfX,kRoomTop, kRoomHalf},
+                        p2[3]={ kRoomHalf,kRoomTop, kRoomHalf}, p3[3]={ kRoomHalf,kRoomTop,-kRoomHalf};
+            const float n[3]={0,-1,0}, t[3]={1,0,0}, bt[3]={0,0,1};
+            FillQuad(tmpV+4, tmpI+6, 4, p0,p1,p2,p3, n,t,bt); }
+          { const float p0[3]={-kLightHalfX,kRoomTop,-kRoomHalf}, p1[3]={-kLightHalfX,kRoomTop,-kLightHalfZ},
+                        p2[3]={ kLightHalfX,kRoomTop,-kLightHalfZ}, p3[3]={ kLightHalfX,kRoomTop,-kRoomHalf};
+            const float n[3]={0,-1,0}, t[3]={1,0,0}, bt[3]={0,0,1};
+            FillQuad(tmpV+8, tmpI+12, 8, p0,p1,p2,p3, n,t,bt); }
+          { const float p0[3]={-kLightHalfX,kRoomTop, kLightHalfZ}, p1[3]={-kLightHalfX,kRoomTop, kRoomHalf},
+                        p2[3]={ kLightHalfX,kRoomTop, kRoomHalf}, p3[3]={ kLightHalfX,kRoomTop, kLightHalfZ};
+            const float n[3]={0,-1,0}, t[3]={1,0,0}, bt[3]={0,0,1};
+            FillQuad(tmpV+12, tmpI+18, 12, p0,p1,p2,p3, n,t,bt); }
+          vcnt[5]=16; icnt[5]=24;
+          m_procSurfaces[5].vb.Create(L"ProcCeiling VB", 16, sizeof(SceneVertex), tmpV);
+          m_procSurfaces[5].ib.Create(L"ProcCeiling IB", 24, sizeof(uint16_t), tmpI); }
+
+        // 6 - Visible emissive panel.  It is skipped by shadow rays/maps.
+        { const float p0[3]={-kLightHalfX,kLightY,-kLightHalfZ}, p1[3]={-kLightHalfX,kLightY, kLightHalfZ},
+                      p2[3]={ kLightHalfX,kLightY, kLightHalfZ}, p3[3]={ kLightHalfX,kLightY,-kLightHalfZ};
+          const float n[3]={0,-1,0}, t[3]={1,0,0}, bt[3]={0,0,1};
+          FillQuad(tmpV, tmpI, 0, p0,p1,p2,p3, n,t,bt);
+          vcnt[6]=4; icnt[6]=6;
+          m_procSurfaces[6].vb.Create(L"ProcAreaLight VB", 4, sizeof(SceneVertex), tmpV);
+          m_procSurfaces[6].ib.Create(L"ProcAreaLight IB", 6, sizeof(uint16_t), tmpI); }
+
         // Finalise per-surface metadata and allocate SRV descriptors.
         UINT descSize = Renderer::s_TextureHeap.GetDescriptorSize();
         D3D12_CPU_DESCRIPTOR_HANDLE defaultSRVs[5] = {
@@ -405,6 +440,13 @@ void Sponza::Startup( Camera& Camera )
             D3D12_CPU_DESCRIPTOR_HANDLE hSlot1 = hBase + descSize;
             g_Device->CopyDescriptors(1, &hSlot1, &five,
                 5, defaultSRVs, oneCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+            if (matIDs[i] == kAreaLightMaterialID)
+            {
+                D3D12_CPU_DESCRIPTOR_HANDLE hEmissive = hBase + 2 * descSize;
+                CreateSolidColorTextureSRV(hEmissive, 1.0f, 0.95f, 0.8f,
+                    m_procEmissiveTextures[i]);
+            }
         }
     }
 }
@@ -472,6 +514,7 @@ void Sponza::RenderObjects( GraphicsContext& gfxContext, const Matrix4& ViewProj
 // procedural surfaces are NOT affected by m_ModelTransform.
 static void RenderProceduralSurfaces(
     GraphicsContext& ctx, bool withMaterials,
+    bool shadowPass,
     const Matrix4& viewProjMat, const Vector3& viewerPos)
 {
     using namespace Sponza;
@@ -492,6 +535,9 @@ static void RenderProceduralSurfaces(
     for (UINT i = 0; i < kNumProcSurfaces; ++i)
     {
         auto& s = m_procSurfaces[i];
+        if (shadowPass && s.materialID == kAreaLightMaterialID)
+            continue;
+
         ctx.SetVertexBuffer(0, s.vb.VertexBufferView(0, s.vertexCount * (UINT)sizeof(SceneVertex), sizeof(SceneVertex)));
         ctx.SetIndexBuffer(s.ib.IndexBufferView(0, s.indexCount * (UINT)sizeof(uint16_t), false));
         if (withMaterials)
@@ -561,22 +607,9 @@ void Sponza::RenderScene(
     float sinphi = sinf(m_SunInclination * 3.14159f * 0.5f);
     m_SunDirection = Normalize(Vector3( costheta * cosphi, sinphi, sintheta * cosphi ));
 
-    // Rotating point light
-    {
-        static int64_t s_lastTick = 0;
-        static double  s_totalTime = 0.0;
-        int64_t now = SystemTime::GetCurrentTick();
-        if (s_lastTick != 0)
-            s_totalTime += SystemTime::TimeBetweenTicks(s_lastTick, now);
-        s_lastTick = now;
-
-        float angle = (float)(s_totalTime * (double)m_PointLightSpeed);
-        float orbitR = (float)m_PointLightOrbit;
-        m_PointLightPos   = Vector3(cosf(angle) * orbitR,
-                                    (float)m_PointLightHeight,
-                                    sinf(angle) * orbitR);
-        m_PointLightColor = Vector3(1.0f, 0.85f, 0.5f) * (float)m_PointLightIntensity;
-    }
+    // The four shader samples are distributed around this fixed panel center.
+    m_PointLightPos   = Vector3(0.0f, (float)m_PointLightHeight, 0.0f);
+    m_PointLightColor = Vector3(1.0f, 0.85f, 0.5f) * (float)m_PointLightIntensity;
 
     __declspec(align(16)) struct
     {
@@ -647,7 +680,7 @@ void Sponza::RenderScene(
         }
         // Procedural surfaces: contribute to depth prepass (for SSAO)
         gfxContext.SetPipelineState(m_DepthPSO);
-        RenderProceduralSurfaces(gfxContext, false, camera.GetViewProjMatrix(), camera.GetPosition());
+        RenderProceduralSurfaces(gfxContext, false, false, camera.GetViewProjMatrix(), camera.GetPosition());
     }
 
     SSAO::Render(gfxContext, camera);
@@ -689,7 +722,7 @@ void Sponza::RenderScene(
                 RenderObjects(gfxContext, m_SunShadow.GetViewProjMatrix(), camera.GetPosition(), kCutout);
                 // Procedural surfaces: cast shadows
                 gfxContext.SetPipelineState(m_ShadowPSO);
-                RenderProceduralSurfaces(gfxContext, false, m_SunShadow.GetViewProjMatrix(), camera.GetPosition());
+                RenderProceduralSurfaces(gfxContext, false, true, m_SunShadow.GetViewProjMatrix(), camera.GetPosition());
                 g_ShadowBuffer.EndRendering(gfxContext);
             }
         }
@@ -733,7 +766,7 @@ void Sponza::RenderScene(
                 RenderObjects( gfxContext, camera.GetViewProjMatrix(), camera.GetPosition(), Sponza::kCutout );
                 // Procedural surfaces: colour pass (floor, walls, box)
                 gfxContext.SetPipelineState(m_ModelPSO);
-                RenderProceduralSurfaces(gfxContext, true, camera.GetViewProjMatrix(), camera.GetPosition());
+                RenderProceduralSurfaces(gfxContext, true, false, camera.GetViewProjMatrix(), camera.GetPosition());
             }
         }
     }
