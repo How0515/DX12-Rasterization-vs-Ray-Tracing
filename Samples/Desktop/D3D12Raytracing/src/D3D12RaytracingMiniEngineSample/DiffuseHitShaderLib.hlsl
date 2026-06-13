@@ -282,7 +282,7 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
 
         if (materialID == 106)
         {
-            g_screenOutput[DispatchRaysIndex().xy] = float4(diffuse * 0.6f, 1.0f);
+            g_screenOutput[DispatchRaysIndex().xy] = float4(diffuse, 1.0f);
             return;
         }
 

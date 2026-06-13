@@ -63,6 +63,8 @@ namespace Sponza
     Vector3 m_PointLightPos;
     Vector3 m_PointLightColor;
 
+    static constexpr float kAreaLightPanelY = 1.445f;
+
     ExpVar m_AmbientIntensity("Sponza/Lighting/Ambient Intensity", 0.0f, -16.0f, 16.0f, 0.1f);
     ExpVar m_SunLightIntensity("Sponza/Lighting/Sun Light Intensity", 0.0f, 0.0f, 16.0f, 0.1f);
     NumVar m_SunOrientation("Sponza/Lighting/Sun Orientation", -1.0f, -100.0f, 100.0f, 0.1f );
@@ -71,7 +73,7 @@ namespace Sponza
     NumVar ShadowDimY("Sponza/Lighting/Shadow Dim Y", 5.0f, 0.5f, 20.0f, 0.25f);
     NumVar ShadowDimZ("Sponza/Lighting/Shadow Dim Z", 14.0f, 1.0f, 40.0f, 0.5f);
 
-    NumVar m_PointLightHeight("Sponza/Lighting/Area Light Height",   1.40f, 0.0f, 2.0f,  0.05f);
+    NumVar m_PointLightHeight("Sponza/Lighting/Area Light Height", kAreaLightPanelY, 0.0f, 2.0f, 0.005f);
     NumVar m_PointLightIntensity("Sponza/Lighting/Area Light Intensity", 0.2f, 0.0f, 10.0f, 0.1f);
 
     // ---- Procedural scene geometry (floor, walls, box, ceiling, light) -----
@@ -274,7 +276,7 @@ void Sponza::Startup( Camera& Camera )
         const float kRoomHalf =  1.00f;
         const float kRoomTop  =  1.45f;
         const float kLightHalfX = 0.28f, kLightHalfZ = 0.20f;
-        const float kLightY = kRoomTop - 0.005f;
+        const float kLightY = kAreaLightPanelY;
         // From the camera, this shorter box sits at the front-right.
         const float kBoxXMin = -0.65f, kBoxXMax = -0.25f;
         const float kBoxYMin = kFloorY, kBoxYMax = 0.52f;

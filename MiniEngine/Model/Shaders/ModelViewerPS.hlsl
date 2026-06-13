@@ -72,7 +72,7 @@ MRT main(VSOutput vsOutput)
 
     colorSum += ApplyRectAreaLightApprox( diffuseAlbedo, specularAlbedo, specularMask, gloss, normal, viewDir,
         vsOutput.worldPos, PointLightPos.xyz, PointLightColor.xyz );
-    colorSum += SAMPLE_TEX(texEmissive).rgb * 0.6f;
+    colorSum += SAMPLE_TEX(texEmissive).rgb;
 
 	// ShadeLights(colorSum, pixelPos,
 	// 	diffuseAlbedo,
