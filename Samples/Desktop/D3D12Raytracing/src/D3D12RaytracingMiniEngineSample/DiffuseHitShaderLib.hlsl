@@ -34,12 +34,14 @@ Texture2D<float4> g_localNormal : register(t7);
 Texture2D<float4>   normals  : register(t13);
 
 static const float kShadowRayEpsilon = 1e-5f;
-static const uint kAreaLightGridDim = 8;
-static const uint kAreaLightSampleCount = kAreaLightGridDim * kAreaLightGridDim;
+static const uint kAreaLightSampleCount = 64;
 
-uint HashAreaLightPixel(uint2 pixelPosition)
+uint HashAreaLightSample(uint2 pixelPosition, uint sampleIndex, uint dimension)
 {
-    uint hash = pixelPosition.x * 0x8da6b343u ^ pixelPosition.y * 0xd8163841u;
+    uint hash = pixelPosition.x * 0x8da6b343u ^
+        pixelPosition.y * 0xd8163841u ^
+        sampleIndex * 0xcb1ab31fu ^
+        dimension * 0x165667b1u;
     hash ^= hash >> 16;
     hash *= 0x7feb352du;
     hash ^= hash >> 15;
@@ -47,27 +49,17 @@ uint HashAreaLightPixel(uint2 pixelPosition)
     return hash ^ (hash >> 16);
 }
 
-float2 GetAreaLightGridRotation(uint2 pixelPosition)
+float HashToUnitFloat(uint hash)
 {
-    float angle = (HashAreaLightPixel(pixelPosition) & 0x00ffffffu) *
-        (6.28318530718f / 16777216.0f);
-    float sine;
-    float cosine;
-    sincos(angle, sine, cosine);
-    return float2(cosine, sine);
+    return (hash & 0x00ffffffu) * (1.0f / 16777216.0f);
 }
 
-float2 GetAreaLightSampleOffset(uint sampleIndex, float2 rotation)
+float2 GetAreaLightSampleOffset(uint sampleIndex, uint2 pixelPosition)
 {
-    float2 gridPosition = float2(sampleIndex % kAreaLightGridDim, sampleIndex / kAreaLightGridDim);
-    float2 centeredGridPosition = (gridPosition + 0.5f) / kAreaLightGridDim - 0.5f;
-    float2 rotatedPosition = float2(
-        rotation.x * centeredGridPosition.x - rotation.y * centeredGridPosition.y,
-        rotation.y * centeredGridPosition.x + rotation.x * centeredGridPosition.y);
-
-    // Keep the rotated grid inside the rectangular emitter.
-    float2 wrappedPosition = frac(rotatedPosition + 0.5f) - 0.5f;
-    return wrappedPosition * float2(0.36f, 0.24f);
+    float2 randomPosition = float2(
+        HashToUnitFloat(HashAreaLightSample(pixelPosition, sampleIndex, 0)),
+        HashToUnitFloat(HashAreaLightSample(pixelPosition, sampleIndex, 1)));
+    return (randomPosition * 2.0f - 1.0f) * float2(0.18f, 0.12f);
 }
 
 uint3 Load3x16BitIndices(
@@ -201,11 +193,11 @@ float3 ApplyRectAreaLightApprox(
     float3 worldPos)
 {
     float3 result = 0.0f;
-    float2 gridRotation = GetAreaLightGridRotation(DispatchRaysIndex().xy);
+    uint2 pixelPosition = DispatchRaysIndex().xy;
     [unroll]
     for (uint i = 0; i < kAreaLightSampleCount; ++i)
     {
-        float2 sampleOffset = GetAreaLightSampleOffset(i, gridRotation);
+        float2 sampleOffset = GetAreaLightSampleOffset(i, pixelPosition);
         float3 samplePos = PointLightPos.xyz + float3(sampleOffset.x, 0.0f, sampleOffset.y);
         float visibility = TraceAreaLightSampleVisibility(worldPos, normal, samplePos);
         float3 toLight = samplePos - worldPos;
