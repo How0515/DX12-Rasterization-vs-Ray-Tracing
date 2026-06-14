@@ -79,8 +79,8 @@ namespace Sponza
     NumVar m_PCSSLightSize("Sponza/Lighting/PCSS Light Size", 0.025f, 0.001f, 0.2f, 0.001f);
     NumVar m_PCSSMaxRadius("Sponza/Lighting/PCSS Max Radius", 0.05f, 0.001f, 0.2f, 0.001f);
 
-    // ---- Procedural scene geometry (floor, walls, box, ceiling, light) -----
-    static const UINT kNumProcSurfaces = 7;
+    // ---- Procedural scene geometry (floor, walls, box, ceiling, light, mirror plate) -----
+    static const UINT kNumProcSurfaces = 8;
     static const UINT kAreaLightMaterialID = 106;
 
     struct ProcSurface
@@ -285,17 +285,18 @@ void Sponza::Startup( Camera& Camera )
         const float kBoxYMin = kFloorY, kBoxYMax = 0.52f;
         const float kBoxZMin = -0.58f, kBoxZMax = -0.18f;
 
-        // Surface diffuse colours (must match DiffuseHitShaderLib.hlsl's GetProceduralColor).
+        // Surface diffuse colours — must match ProceduralMaterial.hlsli baseColor values.
         struct SurfCol { float r, g, b; } cols[kNumProcSurfaces] = {
             {0.725f, 0.710f, 0.680f},   // floor
-            {0.630f, 0.060f, 0.050f},   // red wall   → 빨간색 (Cornell box 기준 유지)
-            {0.140f, 0.450f, 0.090f},   // green wall → 초록색 (Cornell box 기준 유지)
-            {0.720f, 0.710f, 0.680f},   // back wall  → 바닥과 동일
-            {0.900f, 0.400f, 0.050f},   // box        → 주황색
+            {0.630f, 0.060f, 0.050f},   // red wall
+            {0.140f, 0.450f, 0.090f},   // green wall
+            {0.720f, 0.710f, 0.680f},   // back wall
+            {0.720f, 0.710f, 0.680f},   // box (matte paint, Cornell box spec)
             {0.720f, 0.710f, 0.680f},   // ceiling
             {1.000f, 0.950f, 0.800f},   // area light panel
+            {0.950f, 0.900f, 0.800f},   // mirror plate
         };
-        const UINT matIDs[kNumProcSurfaces] = {100, 101, 102, 103, 104, 105, kAreaLightMaterialID};
+        const UINT matIDs[kNumProcSurfaces] = {100, 101, 102, 103, 104, 105, kAreaLightMaterialID, 107};
 
         // FillQuad: writes 4 vertices (pos+normal+tangent+bitangent) and 6 indices.
         // Indices are CCW to match MiniEngine's RasterizerDefault (FrontCounterClockwise=TRUE).
@@ -418,6 +419,20 @@ void Sponza::Startup( Camera& Camera )
           vcnt[6]=4; icnt[6]=6;
           m_procSurfaces[6].vb.Create(L"ProcAreaLight VB", 4, sizeof(SceneVertex), tmpV);
           m_procSurfaces[6].ib.Create(L"ProcAreaLight IB", 6, sizeof(uint16_t), tmpI); }
+
+        // 7 - Mirror plate for reflection comparison (matID 107).
+        // Sits flush on the floor between the box and the back wall.
+        // The 2mm Y offset prevents z-fighting with the floor quad.
+        { const float kPlateY    = kFloorY + 0.002f;
+          const float kPlateXMin = -0.30f, kPlateXMax = 0.30f;
+          const float kPlateZNear = -0.40f, kPlateZFar = -0.70f;
+          const float p0[3]={kPlateXMin,kPlateY,kPlateZNear}, p1[3]={kPlateXMax,kPlateY,kPlateZNear},
+                      p2[3]={kPlateXMax,kPlateY,kPlateZFar},   p3[3]={kPlateXMin,kPlateY,kPlateZFar};
+          const float n[3]={0,1,0}, t[3]={1,0,0}, bt[3]={0,0,-1};
+          FillQuad(tmpV, tmpI, 0, p0,p1,p2,p3, n,t,bt);
+          vcnt[7]=4; icnt[7]=6;
+          m_procSurfaces[7].vb.Create(L"ProcMirrorPlate VB", 4, sizeof(SceneVertex), tmpV);
+          m_procSurfaces[7].ib.Create(L"ProcMirrorPlate IB", 6, sizeof(uint16_t), tmpI); }
 
         // Finalise per-surface metadata and allocate SRV descriptors.
         UINT descSize = Renderer::s_TextureHeap.GetDescriptorSize();
@@ -553,8 +568,7 @@ static void RenderProceduralSurfaces(
         if (withMaterials)
         {
             ctx.SetDescriptorTable(Renderer::kMaterialSRVs, s.srvHandle);
-            uint32_t matIdx = 0;
-            ctx.SetDynamicConstantBufferView(Renderer::kCommonCBV, sizeof(uint32_t), &matIdx);
+            ctx.SetDynamicConstantBufferView(Renderer::kCommonCBV, sizeof(uint32_t), &s.materialID);
         }
         ctx.DrawIndexed(s.indexCount, 0, 0);
     }
