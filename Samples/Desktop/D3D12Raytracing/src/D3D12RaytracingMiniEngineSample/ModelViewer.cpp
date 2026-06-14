@@ -103,7 +103,7 @@ enum RaytracingTypes
 
 const static UINT MaxRayRecursion = 5;  // primary(1) + refl×4(5); shadows blocked at callerDepth≥2
 
-const static UINT c_NumCameraPositions = 8;
+const static UINT c_NumCameraPositions = 9;
 
 struct RaytracingDispatchRayInputs
 {
@@ -1007,6 +1007,13 @@ m_CameraPosArray[6].pitch    = -0.55f;
 m_CameraPosArray[7].position = Vector3(-0.55f, 0.08f, -0.45f);
 m_CameraPosArray[7].heading  = 3.14159f + 0.30f;
 m_CameraPosArray[7].pitch    = 0.0f;
+
+// 8. Depth-2 demo — floor reflects Box B's front face; Box B reflects helmet at Depth 2.
+//    Depth 1: floor shows Box B (silver).  Depth 2: floor→Box B→helmet (coloured).
+//    Switch MaxRecursionDepth between 1 and 2 to see the difference.
+m_CameraPosArray[8].position = Vector3(0.45f, 0.25f, -2.20f);
+m_CameraPosArray[8].heading  = 3.14159f;
+m_CameraPosArray[8].pitch    = -0.16f;
 
 SetCameraToPredefinedPosition(1);
 }
