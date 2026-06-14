@@ -1130,16 +1130,14 @@ void D3D12RaytracingMiniEngineSample::RenderScene(void)
         rayTracingMode == RTM_REFLECTIONS ||
         rayTracingMode == RTM_TRAVERSAL;
         
-    // Raster mode uses the shared shadow buffer for the ceiling area-light PCSS approximation.
-    const bool skipShadowMap = rayTracingMode != RTM_OFF;
+    // Raster mode and SSR mode both use the shadow buffer for the ceiling area-light PCSS approximation.
+    const bool skipShadowMap = rayTracingMode != RTM_OFF && rayTracingMode != RTM_SSR;
 
     GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Render");
 
     uint32_t FrameIndex = TemporalEffects::GetFrameIndexMod2();
     const D3D12_VIEWPORT& viewport = m_MainViewport;
     const D3D12_RECT& scissor = m_MainScissor;
-
-    ParticleEffectManager::Update(gfxContext.GetComputeContext(), Graphics::GetFrameTime());
 
     Sponza::m_DebugView = (uint32_t)(int)g_DebugView;
     Sponza::RenderScene(gfxContext, m_Camera, viewport, scissor, skipDiffusePass, skipShadowMap);
@@ -1151,7 +1149,7 @@ void D3D12RaytracingMiniEngineSample::RenderScene(void)
 
     TemporalEffects::ResolveImage(gfxContext);
 
-    ParticleEffectManager::Render(gfxContext, m_Camera, g_SceneColorBuffer, g_SceneDepthBuffer, g_LinearDepth[FrameIndex]);
+    // ParticleEffectManager::Render disabled — Cornell Box scene has no particle emitters.
 
     // Until I work out how to couple these two, it's "either-or".
     if (DepthOfField::Enable)
