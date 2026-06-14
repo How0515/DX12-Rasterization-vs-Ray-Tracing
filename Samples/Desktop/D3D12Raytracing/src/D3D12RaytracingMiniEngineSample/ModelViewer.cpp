@@ -965,7 +965,7 @@ void D3D12RaytracingMiniEngineSample::Startup( void )
 
     m_CameraPosArrayCurrentPosition = 1;
 
-// 0. Cornell-box front view - light panel, objects, and floor are all visible.
+// 0. Front reflection-chain view: camera -> Box B -> Box A -> helmet.
 m_CameraPosArray[0].position = Vector3(0.0f, 0.70f, -2.65f);
 m_CameraPosArray[0].heading  = 3.14159f;
 m_CameraPosArray[0].pitch    = 0.0f;

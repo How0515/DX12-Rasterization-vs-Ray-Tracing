@@ -9,10 +9,10 @@
 //   101     : Red Wall       diffuse red,   metallic=0, roughness=0.95
 //   102     : Green Wall     diffuse green, metallic=0, roughness=0.95
 //   103     : Back Wall      diffuse grey,  metallic=0, roughness=0.92
-//   104     : Mirror Box A   silver,        metallic=1, roughness=0.02  (Y-rotated 25°)
+//   104     : Mirror Box A   silver,        metallic=1, roughness=0.02  (second-bounce mirror)
 //   105     : Ceiling        diffuse grey,  metallic=0, roughness=0.95
 //   106     : Area Light     emissive panel
-//   108     : Mirror Box B   silver,        metallic=1, roughness=0.02  (axis-aligned, faces Box A)
+//   108     : Mirror Box B   silver,        metallic=1, roughness=0.02  (primary mirror)
 
 #ifndef PROCEDURAL_MATERIAL_HLSLI
 #define PROCEDURAL_MATERIAL_HLSLI

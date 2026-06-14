@@ -257,10 +257,10 @@ void Sponza::Startup( Camera& Camera )
     const float modelThickness = (float)modelDimensions.GetZ();
     const float modelHalfHeight = (float)modelDimensions.GetY() * 0.5f;
 
-    // Cornell-box composition: helmet at front-center, metallic mirror box at back-right.
+    // Reflection chain for the front camera: camera -> Box B -> Box A -> helmet.
     m_ModelTransform = Matrix4(AffineTransform(
-        Matrix3::MakeYRotation(XM_PI),
-        Vector3(0.10f, 0.0f, -0.30f)));
+        Matrix3::MakeYRotation(2.87534f),
+        Vector3(-0.45f, 0.0f, 0.65f)));
 
     // Initial Cornell-box view.  ModelViewer applies the matching preset after
     // creating its camera controller.
@@ -280,14 +280,18 @@ void Sponza::Startup( Camera& Camera )
         const float kRoomTop  =  1.45f;
         const float kLightHalfX = 0.28f, kLightHalfZ = 0.20f;
         const float kLightY = kAreaLightPanelY;
-        // Mirror box A — enlarged ~1.5× (40 cm→60 cm wide) and Y-rotated 25°
-        // (pivot cx=-0.45, cz=0.35; sin25=0.42262, cos25=0.90631).
-        // Precomputed rotated corners; naming: [X][Y][Z] where 0=min, 1=max.
+        // Box A is the second-bounce mirror.  Its front face reflects Box B toward the helmet.
+        // Box B is the primary mirror directly visible from the front camera.
+        // Precomputed rotated corners use [X][Y][Z] naming where 0=min and 1=max.
         const float kBoxYMax = 0.78f;
-        float A000[3]={-0.5951f,kFloorY,-0.0487f}, A100[3]={-0.0513f,kFloorY, 0.2049f};
-        float A010[3]={-0.5951f,kBoxYMax,-0.0487f}, A110[3]={-0.0513f,kBoxYMax, 0.2049f};
-        float A001[3]={-0.8487f,kFloorY, 0.4951f}, A101[3]={-0.3049f,kFloorY, 0.7487f};
-        float A011[3]={-0.8487f,kBoxYMax, 0.4951f}, A111[3]={-0.3049f,kBoxYMax, 0.7487f};
+        float A000[3]={-0.0807f,kFloorY,-0.1047f}, A100[3]={-0.5193f,kFloorY, 0.3047f};
+        float A010[3]={-0.0807f,kBoxYMax,-0.1047f}, A110[3]={-0.5193f,kBoxYMax,0.3047f};
+        float A001[3]={-0.4901f,kFloorY,-0.5433f}, A101[3]={-0.9287f,kFloorY,-0.1339f};
+        float A011[3]={-0.4901f,kBoxYMax,-0.5433f}, A111[3]={-0.9287f,kBoxYMax,-0.1339f};
+        float B000[3]={ 0.2804f,kFloorY, 0.1974f}, B100[3]={ 0.6196f,kFloorY,-0.2974f};
+        float B010[3]={ 0.2804f,kBoxYMax,0.1974f}, B110[3]={ 0.6196f,kBoxYMax,-0.2974f};
+        float B001[3]={ 0.6515f,kFloorY, 0.4519f}, B101[3]={ 0.9908f,kFloorY,-0.0430f};
+        float B011[3]={ 0.6515f,kBoxYMax,0.4519f}, B111[3]={ 0.9908f,kBoxYMax,-0.0430f};
 
         // Surface diffuse colours — must match ProceduralMaterial.hlsli baseColor values.
         struct SurfCol { float r, g, b; } cols[kNumProcSurfaces] = {
@@ -298,7 +302,7 @@ void Sponza::Startup( Camera& Camera )
             {0.950f, 0.950f, 0.950f},   // mirror box A (silver, rotated)
             {0.720f, 0.710f, 0.680f},   // ceiling
             {1.000f, 0.950f, 0.800f},   // area light panel
-            {0.950f, 0.950f, 0.950f},   // mirror box B (silver, axis-aligned)
+            {0.950f, 0.950f, 0.950f},   // mirror box B (silver, rotated)
         };
         const UINT matIDs[kNumProcSurfaces] = {100, 101, 102, 103, 104, 105, kAreaLightMaterialID, 108};
 
@@ -363,19 +367,19 @@ void Sponza::Startup( Camera& Camera )
           m_procSurfaces[3].vb.Create(L"ProcWhiteWall VB", 4, sizeof(SceneVertex), tmpV);
           m_procSurfaces[3].ib.Create(L"ProcWhiteWall IB", 6, sizeof(uint16_t),    tmpI); }
 
-        // 4 – Mirror box A (enlarged, Y-rotated 25°; 6 faces: top/front/back/left/right/bottom)
+        // 4 - Mirror box A: second bounce toward the helmet hidden behind it (yaw +137.02 degrees).
         { memset(tmpV, 0, sizeof(tmpV)); memset(tmpI, 0, sizeof(tmpI));
-          { const float n[3]={ 0.f,     1.f,      0.f},    t[3]={ 0.9063f,0.f, 0.4226f}, bt[3]={ 0.4226f,0.f,-0.9063f};
+          { const float n[3]={ 0.f,     1.f,      0.f},    t[3]={-0.7310f,0.f, 0.6823f}, bt[3]={ 0.6823f,0.f, 0.7310f};
             FillQuad(tmpV+0,  tmpI+0,  0,  A010,A110,A111,A011, n,t,bt); }  // top
-          { const float n[3]={ 0.4226f, 0.f,-0.9063f},     t[3]={ 0.9063f,0.f, 0.4226f}, bt[3]={ 0.f,1.f,0.f};
+          { const float n[3]={ 0.6823f, 0.f, 0.7310f},     t[3]={-0.7310f,0.f, 0.6823f}, bt[3]={ 0.f,1.f,0.f};
             FillQuad(tmpV+4,  tmpI+6,  4,  A010,A000,A100,A110, n,t,bt); }  // front (Zmin)
-          { const float n[3]={-0.4226f, 0.f, 0.9063f},     t[3]={-0.9063f,0.f,-0.4226f}, bt[3]={ 0.f,1.f,0.f};
+          { const float n[3]={-0.6823f, 0.f,-0.7310f},     t[3]={ 0.7310f,0.f,-0.6823f}, bt[3]={ 0.f,1.f,0.f};
             FillQuad(tmpV+8,  tmpI+12, 8,  A111,A101,A001,A011, n,t,bt); }  // back  (Zmax)
-          { const float n[3]={-0.9063f, 0.f,-0.4226f},     t[3]={ 0.f,1.f,0.f},          bt[3]={ 0.4226f,0.f,-0.9063f};
+          { const float n[3]={ 0.7310f, 0.f,-0.6823f},     t[3]={ 0.f,1.f,0.f},          bt[3]={ 0.6823f,0.f, 0.7310f};
             FillQuad(tmpV+12, tmpI+18, 12, A011,A001,A000,A010, n,t,bt); }  // left  (Xmin)
-          { const float n[3]={ 0.9063f, 0.f, 0.4226f},     t[3]={ 0.f,1.f,0.f},          bt[3]={-0.4226f,0.f, 0.9063f};
+          { const float n[3]={-0.7310f, 0.f, 0.6823f},     t[3]={ 0.f,1.f,0.f},          bt[3]={-0.6823f,0.f,-0.7310f};
             FillQuad(tmpV+16, tmpI+24, 16, A110,A100,A101,A111, n,t,bt); }  // right (Xmax)
-          { const float n[3]={ 0.f,    -1.f,      0.f},    t[3]={ 0.9063f,0.f, 0.4226f}, bt[3]={-0.4226f,0.f, 0.9063f};
+          { const float n[3]={ 0.f,    -1.f,      0.f},    t[3]={-0.7310f,0.f, 0.6823f}, bt[3]={-0.6823f,0.f,-0.7310f};
             FillQuad(tmpV+20, tmpI+30, 20, A001,A101,A100,A000, n,t,bt); }  // bottom
           vcnt[4]=24; icnt[4]=36;
           m_procSurfaces[4].vb.Create(L"ProcBox VB", 24, sizeof(SceneVertex), tmpV);
@@ -412,34 +416,20 @@ void Sponza::Startup( Camera& Camera )
           m_procSurfaces[6].vb.Create(L"ProcAreaLight VB", 4, sizeof(SceneVertex), tmpV);
           m_procSurfaces[6].ib.Create(L"ProcAreaLight IB", 6, sizeof(uint16_t), tmpI); }
 
-        // 7 – Mirror box B (axis-aligned; right side, faces Box A for mirror-in-mirror bounce).
-        // X: 0.15→0.75, Z: 0.10→0.55, Y: floor→0.78.  MatID 108 (same silver PBR as 104).
-        { const float kBXMin=0.15f,kBXMax=0.75f,kBYMax=0.78f,kBZMin=0.10f,kBZMax=0.55f;
-          memset(tmpV, 0, sizeof(tmpV)); memset(tmpI, 0, sizeof(tmpI));
-          { const float p0[3]={kBXMin,kBYMax,kBZMin},p1[3]={kBXMax,kBYMax,kBZMin},
-                        p2[3]={kBXMax,kBYMax,kBZMax},p3[3]={kBXMin,kBYMax,kBZMax};
-            const float n[3]={0,1,0},t[3]={1,0,0},bt[3]={0,0,-1};
-            FillQuad(tmpV+0, tmpI+0, 0, p0,p1,p2,p3, n,t,bt); }   // top
-          { const float p0[3]={kBXMin,kBYMax,kBZMin},p1[3]={kBXMin,kFloorY,kBZMin},
-                        p2[3]={kBXMax,kFloorY,kBZMin},p3[3]={kBXMax,kBYMax,kBZMin};
-            const float n[3]={0,0,-1},t[3]={1,0,0},bt[3]={0,1,0};
-            FillQuad(tmpV+4, tmpI+6, 4, p0,p1,p2,p3, n,t,bt); }   // front
-          { const float p0[3]={kBXMax,kBYMax,kBZMax},p1[3]={kBXMax,kFloorY,kBZMax},
-                        p2[3]={kBXMin,kFloorY,kBZMax},p3[3]={kBXMin,kBYMax,kBZMax};
-            const float n[3]={0,0,1},t[3]={-1,0,0},bt[3]={0,1,0};
-            FillQuad(tmpV+8,  tmpI+12, 8,  p0,p1,p2,p3, n,t,bt); }  // back
-          { const float p0[3]={kBXMin,kBYMax,kBZMax},p1[3]={kBXMin,kFloorY,kBZMax},
-                        p2[3]={kBXMin,kFloorY,kBZMin},p3[3]={kBXMin,kBYMax,kBZMin};
-            const float n[3]={-1,0,0},t[3]={0,1,0},bt[3]={0,0,-1};
-            FillQuad(tmpV+12, tmpI+18, 12, p0,p1,p2,p3, n,t,bt); }  // left
-          { const float p0[3]={kBXMax,kBYMax,kBZMin},p1[3]={kBXMax,kFloorY,kBZMin},
-                        p2[3]={kBXMax,kFloorY,kBZMax},p3[3]={kBXMax,kBYMax,kBZMax};
-            const float n[3]={1,0,0},t[3]={0,1,0},bt[3]={0,0,1};
-            FillQuad(tmpV+16, tmpI+24, 16, p0,p1,p2,p3, n,t,bt); }  // right
-          { const float p0[3]={kBXMin,kFloorY,kBZMax},p1[3]={kBXMax,kFloorY,kBZMax},
-                        p2[3]={kBXMax,kFloorY,kBZMin},p3[3]={kBXMin,kFloorY,kBZMin};
-            const float n[3]={0,-1,0},t[3]={1,0,0},bt[3]={0,0,1};
-            FillQuad(tmpV+20, tmpI+30, 20, p0,p1,p2,p3, n,t,bt); }  // bottom
+        // 7 - Mirror box B: primary reflection toward Box A (yaw -55.56 degrees).
+        { memset(tmpV, 0, sizeof(tmpV)); memset(tmpI, 0, sizeof(tmpI));
+          { const float n[3]={ 0.f,     1.f,      0.f},    t[3]={ 0.5655f,0.f,-0.8248f}, bt[3]={-0.8248f,0.f,-0.5655f};
+            FillQuad(tmpV+0,  tmpI+0,  0,  B010,B110,B111,B011, n,t,bt); }  // top
+          { const float n[3]={-0.8248f, 0.f,-0.5655f},     t[3]={ 0.5655f,0.f,-0.8248f}, bt[3]={ 0.f,1.f,0.f};
+            FillQuad(tmpV+4,  tmpI+6,  4,  B010,B000,B100,B110, n,t,bt); }  // front
+          { const float n[3]={ 0.8248f, 0.f, 0.5655f},     t[3]={-0.5655f,0.f, 0.8248f}, bt[3]={ 0.f,1.f,0.f};
+            FillQuad(tmpV+8,  tmpI+12, 8,  B111,B101,B001,B011, n,t,bt); }  // back
+          { const float n[3]={-0.5655f, 0.f, 0.8248f},     t[3]={ 0.f,1.f,0.f},          bt[3]={-0.8248f,0.f,-0.5655f};
+            FillQuad(tmpV+12, tmpI+18, 12, B011,B001,B000,B010, n,t,bt); }  // left
+          { const float n[3]={ 0.5655f, 0.f,-0.8248f},     t[3]={ 0.f,1.f,0.f},          bt[3]={ 0.8248f,0.f, 0.5655f};
+            FillQuad(tmpV+16, tmpI+24, 16, B110,B100,B101,B111, n,t,bt); }  // right
+          { const float n[3]={ 0.f,    -1.f,      0.f},    t[3]={ 0.5655f,0.f,-0.8248f}, bt[3]={ 0.8248f,0.f, 0.5655f};
+            FillQuad(tmpV+20, tmpI+30, 20, B001,B101,B100,B000, n,t,bt); }  // bottom
           vcnt[7]=24; icnt[7]=36;
           m_procSurfaces[7].vb.Create(L"ProcBoxB VB", 24, sizeof(SceneVertex), tmpV);
           m_procSurfaces[7].ib.Create(L"ProcBoxB IB", 36, sizeof(uint16_t),    tmpI); }

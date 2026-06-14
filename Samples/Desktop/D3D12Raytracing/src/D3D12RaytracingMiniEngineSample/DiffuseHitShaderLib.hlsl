@@ -267,23 +267,23 @@ float3 GetProceduralNormal(uint matID, uint primIdx)
     if (matID == 103) return float3( 0,  0, -1);  // back wall
     if (matID == 105) return float3( 0, -1,  0);  // ceiling
     if (matID == 106) return float3( 0, -1,  0);  // area light panel
-    if (matID == 104)  // Box A: Y-rotated 25° (sin=0.4226, cos=0.9063)
+    if (matID == 104)  // Box A: second-bounce mirror, yaw +137.02 degrees
     {
         if (primIdx <  2) return float3( 0,       1,      0);       // top
-        if (primIdx <  4) return float3( 0.4226f, 0, -0.9063f);     // front (Zmin)
-        if (primIdx <  6) return float3(-0.4226f, 0,  0.9063f);     // back  (Zmax)
-        if (primIdx <  8) return float3(-0.9063f, 0, -0.4226f);     // left  (Xmin)
-        if (primIdx < 10) return float3( 0.9063f, 0,  0.4226f);     // right (Xmax)
+        if (primIdx <  4) return float3( 0.6823f, 0,  0.7310f);     // front
+        if (primIdx <  6) return float3(-0.6823f, 0, -0.7310f);     // back
+        if (primIdx <  8) return float3( 0.7310f, 0, -0.6823f);     // left
+        if (primIdx < 10) return float3(-0.7310f, 0,  0.6823f);     // right
                           return float3( 0,      -1,      0);       // bottom
     }
-    if (matID == 108)  // Box B: axis-aligned (mirrors Box A across room center)
+    if (matID == 108)  // Box B: primary mirror, yaw -55.56 degrees
     {
-        if (primIdx <  2) return float3( 0,  1,  0);  // top
-        if (primIdx <  4) return float3( 0,  0, -1);  // front
-        if (primIdx <  6) return float3( 0,  0,  1);  // back
-        if (primIdx <  8) return float3(-1,  0,  0);  // left  (faces Box A)
-        if (primIdx < 10) return float3( 1,  0,  0);  // right
-                          return float3( 0, -1,  0);  // bottom
+        if (primIdx <  2) return float3( 0,       1,      0);       // top
+        if (primIdx <  4) return float3(-0.8248f, 0, -0.5655f);     // front
+        if (primIdx <  6) return float3( 0.8248f, 0,  0.5655f);     // back
+        if (primIdx <  8) return float3(-0.5655f, 0,  0.8248f);     // left
+        if (primIdx < 10) return float3( 0.5655f, 0, -0.8248f);     // right
+                          return float3( 0,      -1,      0);       // bottom
     }
     return float3(0, 1, 0);
 }
