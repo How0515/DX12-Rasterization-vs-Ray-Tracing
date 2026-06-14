@@ -44,8 +44,8 @@ struct VSOutput
 
 struct MRT
 {
-	float3 Color : SV_Target0;
-	float3 Normal : SV_Target1;
+	float3 Color  : SV_Target0;
+	float4 Normal : SV_Target1;  // xyz = world normal, w = metallic (for SSR masking)
 };
 
 [RootSignature(Renderer_RootSig)]
@@ -127,7 +127,7 @@ MRT main(VSOutput vsOutput)
     else if (DebugView == 3) colorSum = float3(metallic, metallic, metallic);
     else if (DebugView == 4) colorSum = normal * 0.5 + 0.5;
 
-	mrt.Normal = normal;
+	mrt.Normal = float4(normal, metallic);
 	mrt.Color = colorSum;
 	return mrt;
 }
