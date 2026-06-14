@@ -203,7 +203,7 @@ float3 ApplyRectAreaLightApprox(
 {
     float3 result = 0.0f;
     float2 gridRotation = GetAreaLightGridRotation(DispatchRaysIndex().xy);
-    [unroll]
+    [loop]
     for (uint i = 0; i < kAreaLightSampleCount; ++i)
     {
         float2 sampleOffset = GetAreaLightSampleOffset(i, gridRotation);
