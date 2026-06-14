@@ -291,10 +291,10 @@ void Sponza::Startup( Camera& Camera )
             {0.630f, 0.060f, 0.050f},   // red wall
             {0.140f, 0.450f, 0.090f},   // green wall
             {0.720f, 0.710f, 0.680f},   // back wall
-            {0.720f, 0.710f, 0.680f},   // box (matte paint, Cornell box spec)
+            {0.900f, 0.400f, 0.050f},   // box (orange)
             {0.720f, 0.710f, 0.680f},   // ceiling
             {1.000f, 0.950f, 0.800f},   // area light panel
-            {0.950f, 0.900f, 0.800f},   // mirror plate
+            {0.950f, 0.950f, 0.950f},   // mirror plate
         };
         const UINT matIDs[kNumProcSurfaces] = {100, 101, 102, 103, 104, 105, kAreaLightMaterialID, 107};
 
@@ -421,11 +421,12 @@ void Sponza::Startup( Camera& Camera )
           m_procSurfaces[6].ib.Create(L"ProcAreaLight IB", 6, sizeof(uint16_t), tmpI); }
 
         // 7 - Mirror plate for reflection comparison (matID 107).
-        // Sits flush on the floor between the box and the back wall.
-        // The 2mm Y offset prevents z-fighting with the floor quad.
-        { const float kPlateY    = kFloorY + 0.002f;
-          const float kPlateXMin = -0.30f, kPlateXMax = 0.30f;
-          const float kPlateZNear = -0.40f, kPlateZFar = -0.70f;
+        // Positioned so the camera (z=-2.65, y=0.70) can see reflections at a grazing angle.
+        // Placed between helmet and box; x offset keeps it in camera FOV.
+        // 3mm Y lift prevents z-fighting with the floor quad.
+        { const float kPlateY    = kFloorY + 0.003f;
+          const float kPlateXMin = -0.10f, kPlateXMax =  0.35f;
+          const float kPlateZNear = -0.55f, kPlateZFar = -0.25f;
           const float p0[3]={kPlateXMin,kPlateY,kPlateZNear}, p1[3]={kPlateXMax,kPlateY,kPlateZNear},
                       p2[3]={kPlateXMax,kPlateY,kPlateZFar},   p3[3]={kPlateXMin,kPlateY,kPlateZFar};
           const float n[3]={0,1,0}, t[3]={1,0,0}, bt[3]={0,0,-1};
