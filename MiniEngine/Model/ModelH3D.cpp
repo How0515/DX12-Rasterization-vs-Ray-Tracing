@@ -318,9 +318,18 @@ void ModelH3D::LoadTextures(const std::wstring& basePath)
         std::wstring diffusePath = basePath + RemoveExt(pMaterial.texDiffusePath);
         MatTextures[0] = LoadDDSFromFile(diffusePath + L".dds", kWhiteOpaque2D, true);
 
-        // Load specular
+        // Load ORM (OcclusionRoughnessMetal).
+        // Priority: explicit specularPath in H3D → *_OcclusionRoughMetal derived from diffuse → *_specular legacy fallback
         std::wstring specularPath = basePath + RemoveExt(pMaterial.texSpecularPath);
         MatTextures[1] = LoadDDSFromFile(specularPath + L".dds", kBlackOpaque2D, true);
+        if (!MatTextures[1].IsValid())
+        {
+            std::wstring ormPath = diffusePath;
+            size_t pos = ormPath.rfind(L"_BaseColor");
+            if (pos != std::wstring::npos)
+                ormPath = ormPath.substr(0, pos) + L"_OcclusionRoughMetal";
+            MatTextures[1] = LoadDDSFromFile(ormPath + L".dds", kBlackOpaque2D, true);
+        }
         if (!MatTextures[1].IsValid())
             MatTextures[1] = LoadDDSFromFile(diffusePath + L"_specular.dds", kBlackOpaque2D, true);
 
