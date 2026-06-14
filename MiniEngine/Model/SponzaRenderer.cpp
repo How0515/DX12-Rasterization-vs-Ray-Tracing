@@ -287,7 +287,7 @@ void Sponza::Startup( Camera& Camera )
 
         // Surface diffuse colours — must match ProceduralMaterial.hlsli baseColor values.
         struct SurfCol { float r, g, b; } cols[kNumProcSurfaces] = {
-            {0.725f, 0.710f, 0.680f},   // floor
+            {0.800f, 0.800f, 0.820f},   // floor (polished metal)
             {0.630f, 0.060f, 0.050f},   // red wall
             {0.140f, 0.450f, 0.090f},   // green wall
             {0.720f, 0.710f, 0.680f},   // back wall

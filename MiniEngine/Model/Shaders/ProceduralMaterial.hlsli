@@ -5,7 +5,7 @@
 //
 // MaterialID convention:
 //   0  - 26 : FlightHelmet submeshes — ORM texture path
-//   100     : Floor          diffuse grey,  metallic=0, roughness=0.80
+//   100     : Floor          polished metal, metallic=0.85, roughness=0.15  (Depth-2 double-bounce)
 //   101     : Red Wall       diffuse red,   metallic=0, roughness=0.95
 //   102     : Green Wall     diffuse green, metallic=0, roughness=0.95
 //   103     : Back Wall      diffuse grey,  metallic=0, roughness=0.92
@@ -30,7 +30,7 @@ ProcMat GetProceduralMaterial(uint matID)
     m.ao = 1.0;
     [branch] switch (matID)
     {
-    case 100: m.baseColor = float3(0.725, 0.710, 0.680); m.metallic = 0.0; m.roughness = 0.80; break; // floor
+    case 100: m.baseColor = float3(0.800, 0.800, 0.820); m.metallic = 0.85; m.roughness = 0.15; break; // floor (polished metal for Depth-2 bounce)
     case 101: m.baseColor = float3(0.630, 0.060, 0.050); m.metallic = 0.0; m.roughness = 0.95; break; // red wall
     case 102: m.baseColor = float3(0.140, 0.450, 0.090); m.metallic = 0.0; m.roughness = 0.95; break; // green wall
     case 103: m.baseColor = float3(0.720, 0.710, 0.680); m.metallic = 0.0; m.roughness = 0.92; break; // back wall
