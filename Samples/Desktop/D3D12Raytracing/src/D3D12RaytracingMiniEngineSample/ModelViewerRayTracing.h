@@ -38,7 +38,8 @@ cbuffer HitShaderConstants : register(b0)
     float4x4 ModelToShadow;
     uint IsReflection;
     uint UseShadowRays;
-    // implicit 8-byte pad → offset 144
+    uint DebugView;
+    // implicit 4-byte pad → offset 144
     float4 PointLightPos;    // xyz = world position, w = unused
     float4 PointLightColor;  // xyz = radiance, w = unused
 }

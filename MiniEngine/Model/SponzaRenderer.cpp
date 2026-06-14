@@ -60,8 +60,9 @@ namespace Sponza
     Vector3 m_SunDirection;
     ShadowCamera m_SunShadow;
 
-    Vector3 m_PointLightPos;
-    Vector3 m_PointLightColor;
+    Vector3  m_PointLightPos;
+    Vector3  m_PointLightColor;
+    uint32_t m_DebugView = 0;
 
     static constexpr float kAreaLightPanelY = 1.445f;
 
@@ -630,7 +631,8 @@ void Sponza::RenderScene(
         uint32_t TileCount[4];
         uint32_t FirstLightIndex[4];
         uint32_t FrameIndexMod2;
-        // implicit 12-byte pad → offset 128
+        uint32_t debugView;
+        // implicit 8-byte pad → offset 128
         Vector3  pointLightPos;
         Vector3  pointLightColor;
         Vector4  areaShadowParams;
@@ -647,6 +649,7 @@ void Sponza::RenderScene(
     psConstants.FirstLightIndex[0] = Lighting::m_FirstConeLight;
     psConstants.FirstLightIndex[1] = Lighting::m_FirstConeShadowedLight;
     psConstants.FrameIndexMod2    = FrameIndex;
+    psConstants.debugView         = m_DebugView;
     psConstants.pointLightPos     = m_PointLightPos;
     psConstants.pointLightColor   = m_PointLightColor;
     psConstants.areaShadowParams  = Vector4(

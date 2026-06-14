@@ -49,6 +49,7 @@ namespace Sponza
     extern ExpVar m_SunLightIntensity;
     extern Math::Vector3 m_PointLightPos;
     extern Math::Vector3 m_PointLightColor;
+    extern uint32_t      m_DebugView;
 
     // -------------------------------------------------------------------------
     // Procedural scene geometry (floor, walls, box occluder).

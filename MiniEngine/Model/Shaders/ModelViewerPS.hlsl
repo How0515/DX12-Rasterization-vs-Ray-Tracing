@@ -91,6 +91,11 @@ MRT main(VSOutput vsOutput)
 	// 	vsOutput.worldPos
 	// 	);
 
+    if (DebugView == 1)      colorSum = float3(ao, ao, ao);
+    else if (DebugView == 2) colorSum = float3(roughness, roughness, roughness);
+    else if (DebugView == 3) colorSum = float3(metallic, metallic, metallic);
+    else if (DebugView == 4) colorSum = normal * 0.5 + 0.5;
+
 	mrt.Normal = normal;
 	mrt.Color = colorSum;
 	return mrt;

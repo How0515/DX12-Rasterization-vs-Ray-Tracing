@@ -68,7 +68,8 @@ __declspec(align(16)) struct HitShaderConstants
     Matrix4 modelToShadow;
     UINT32 IsReflection;
     UINT32 UseShadowRays;
-    // implicit 8-byte pad → offset 144
+    UINT32 debugView;
+    // implicit 4-byte pad → offset 144
     Vector3 pointLightPos;
     Vector3 pointLightColor;
 };
@@ -277,6 +278,9 @@ enum RaytracingMode
     RTM_REFLECTIONS,
 };
 EnumVar rayTracingMode("Application/Raytracing/RayTraceMode", RTM_OFF, _countof(rayTracingModes), rayTracingModes);
+
+const char* debugViewModes[] = { "None", "AO", "Roughness", "Metallic", "Normal" };
+EnumVar g_DebugView("Application/Debug View", 0, _countof(debugViewModes), debugViewModes);
 
 class DescriptorHeapStack
 {
@@ -1094,6 +1098,7 @@ void D3D12RaytracingMiniEngineSample::RenderScene(void)
 
     ParticleEffectManager::Update(gfxContext.GetComputeContext(), Graphics::GetFrameTime());
 
+    Sponza::m_DebugView = (uint32_t)(int)g_DebugView;
     Sponza::RenderScene(gfxContext, m_Camera, viewport, scissor, skipDiffusePass, skipShadowMap);
 
     // Some systems generate a per-pixel velocity buffer to better track dynamic and skinned meshes.  Everything
@@ -1139,6 +1144,7 @@ void Raytracebarycentrics(
     hitShaderConstants.IsReflection = false;
     hitShaderConstants.pointLightPos   = Sponza::m_PointLightPos;
     hitShaderConstants.pointLightColor = Sponza::m_PointLightColor;
+    hitShaderConstants.debugView       = (UINT32)(int)g_DebugView;
     context.WriteBuffer(g_hitConstantBuffer, 0, &hitShaderConstants, sizeof(hitShaderConstants));
 
     context.WriteBuffer(g_dynamicConstantBuffer, 0, &inputs, sizeof(inputs));
@@ -1187,6 +1193,7 @@ void RaytracebarycentricsSSR(
 
     HitShaderConstants hitShaderConstants = {};
     hitShaderConstants.IsReflection = false;
+    hitShaderConstants.debugView     = (UINT32)(int)g_DebugView;
     context.WriteBuffer(g_hitConstantBuffer, 0, &hitShaderConstants, sizeof(hitShaderConstants));
 
     ComputeContext& ctx = context.GetComputeContext();
@@ -1245,6 +1252,7 @@ void D3D12RaytracingMiniEngineSample::RaytraceShadows(
     hitShaderConstants.UseShadowRays = false;
     hitShaderConstants.pointLightPos   = Sponza::m_PointLightPos;
     hitShaderConstants.pointLightColor = Sponza::m_PointLightColor;
+    hitShaderConstants.debugView       = (UINT32)(int)g_DebugView;
     context.WriteBuffer(g_hitConstantBuffer, 0, &hitShaderConstants, sizeof(hitShaderConstants));
 
     ComputeContext& ctx = context.GetComputeContext();
@@ -1304,6 +1312,7 @@ void D3D12RaytracingMiniEngineSample::RaytraceDiffuse(
     hitShaderConstants.UseShadowRays = rayTracingMode == RTM_DIFFUSE_WITH_SHADOWRAYS;
     hitShaderConstants.pointLightPos   = Sponza::m_PointLightPos;
     hitShaderConstants.pointLightColor = Sponza::m_PointLightColor;
+    hitShaderConstants.debugView       = (UINT32)(int)g_DebugView;
     context.WriteBuffer(g_hitConstantBuffer, 0, &hitShaderConstants, sizeof(hitShaderConstants));
     context.WriteBuffer(g_dynamicConstantBuffer, 0, &inputs, sizeof(inputs));
 
@@ -1362,6 +1371,7 @@ void D3D12RaytracingMiniEngineSample::RaytraceReflections(
     hitShaderConstants.UseShadowRays = false;
     hitShaderConstants.pointLightPos   = Sponza::m_PointLightPos;
     hitShaderConstants.pointLightColor = Sponza::m_PointLightColor;
+    hitShaderConstants.debugView       = (UINT32)(int)g_DebugView;
     context.WriteBuffer(g_hitConstantBuffer, 0, &hitShaderConstants, sizeof(hitShaderConstants));
     context.WriteBuffer(g_dynamicConstantBuffer, 0, &inputs, sizeof(inputs));
 

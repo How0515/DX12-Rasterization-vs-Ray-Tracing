@@ -434,8 +434,14 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         diffuseContrib, specularAlbedo, specularMask, gloss,
         normal, viewDir, worldPosition);
 
+    // Debug view override
+    if (DebugView == 1)      outputColor = float3(ao, ao, ao);
+    else if (DebugView == 2) outputColor = float3(roughness, roughness, roughness);
+    else if (DebugView == 3) outputColor = float3(metallic, metallic, metallic);
+    else if (DebugView == 4) outputColor = normal * 0.5 + 0.5;
+
     // TODO: Should be passed in via material info
-    if (IsReflection)
+    if (DebugView == 0 && IsReflection)
     {
         float reflectivity = normals[DispatchRaysIndex().xy].w;
         outputColor = g_screenOutput[DispatchRaysIndex().xy].rgb + reflectivity * outputColor;

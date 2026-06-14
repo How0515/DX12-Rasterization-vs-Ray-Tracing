@@ -28,7 +28,8 @@ cbuffer PSConstants : register(b0)
     uint4 FirstLightIndex;
 
     uint FrameIndexMod2;
-    // implicit 12-byte pad → offset 128
+    uint DebugView;
+    // implicit 8-byte pad → offset 128
     float4 PointLightPos;    // xyz = world position, w = unused
     float4 PointLightColor;  // xyz = radiance, w = unused
     float4 AreaShadowParams; // x = near, y = far, z = light size in UV, w = max PCSS radius in UV
