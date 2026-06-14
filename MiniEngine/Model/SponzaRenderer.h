@@ -19,6 +19,7 @@ class GraphicsContext;
 class ShadowCamera;
 class ModelH3D;
 class ExpVar;
+class NumVar;
 
 namespace Math
 {
@@ -50,6 +51,7 @@ namespace Sponza
     extern Math::Vector3 m_PointLightPos;
     extern Math::Vector3 m_PointLightColor;
     extern uint32_t      m_DebugView;
+    extern NumVar        m_BoxARoughness; // [0,1] roughness for Box A; Box B stays as mirror
 
     // -------------------------------------------------------------------------
     // Procedural scene geometry (floor, walls, box occluder).

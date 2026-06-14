@@ -61,7 +61,7 @@ MRT main(VSOutput vsOutput)
 
     if (MaterialID >= 100)
     {
-        ProcMat pm    = GetProceduralMaterial(MaterialID);
+        ProcMat pm    = GetProceduralMaterial(MaterialID, BoxARoughness);
         diffuseAlbedo = pm.baseColor;
         metallic      = pm.metallic;
         roughness     = pm.roughness;

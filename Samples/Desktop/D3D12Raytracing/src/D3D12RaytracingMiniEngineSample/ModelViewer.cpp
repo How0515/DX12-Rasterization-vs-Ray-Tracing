@@ -72,6 +72,8 @@ __declspec(align(16)) struct HitShaderConstants
     UINT32 MaxRecursionDepth;  // 0=off, 1=Depth1, 2=Depth2; fills former implicit pad (offset 140)
     Vector3 pointLightPos;
     Vector3 pointLightColor;
+    float   boxARoughness;
+    float   _pad[3];
 };
 
 ByteAddressBuffer          g_hitConstantBuffer;
@@ -1372,6 +1374,7 @@ void D3D12RaytracingMiniEngineSample::RaytraceDiffuse(
     hitShaderConstants.pointLightPos   = Sponza::m_PointLightPos;
     hitShaderConstants.pointLightColor = Sponza::m_PointLightColor;
     hitShaderConstants.debugView       = (UINT32)(int)g_DebugView;
+    hitShaderConstants.boxARoughness   = (float)Sponza::m_BoxARoughness;
     context.WriteBuffer(g_hitConstantBuffer, 0, &hitShaderConstants, sizeof(hitShaderConstants));
     context.WriteBuffer(g_dynamicConstantBuffer, 0, &inputs, sizeof(inputs));
 
@@ -1431,6 +1434,7 @@ void D3D12RaytracingMiniEngineSample::RaytraceReflections(
     hitShaderConstants.pointLightPos   = Sponza::m_PointLightPos;
     hitShaderConstants.pointLightColor = Sponza::m_PointLightColor;
     hitShaderConstants.debugView       = (UINT32)(int)g_DebugView;
+    hitShaderConstants.boxARoughness   = (float)Sponza::m_BoxARoughness;
     context.WriteBuffer(g_hitConstantBuffer, 0, &hitShaderConstants, sizeof(hitShaderConstants));
     context.WriteBuffer(g_dynamicConstantBuffer, 0, &inputs, sizeof(inputs));
 

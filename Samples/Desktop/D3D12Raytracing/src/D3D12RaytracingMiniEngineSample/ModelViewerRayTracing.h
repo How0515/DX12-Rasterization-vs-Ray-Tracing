@@ -46,6 +46,8 @@ cbuffer HitShaderConstants : register(b0)
     uint MaxRecursionDepth;  // 0=off, 1=Depth1, 2=Depth2; fills former implicit pad (offset 140)
     float4 PointLightPos;    // xyz = world position, w = unused
     float4 PointLightColor;  // xyz = radiance, w = unused
+    float  BoxARoughness;    // runtime roughness for Box A (matID 104); Box B stays at 0.02
+    float3 _boxARPad;
 }
 
 cbuffer b1 : register(b1)

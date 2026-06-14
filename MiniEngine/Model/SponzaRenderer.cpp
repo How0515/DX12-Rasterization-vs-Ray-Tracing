@@ -79,6 +79,8 @@ namespace Sponza
     NumVar m_PCSSLightSize("Sponza/Lighting/PCSS Light Size", 0.025f, 0.001f, 0.2f, 0.001f);
     NumVar m_PCSSMaxRadius("Sponza/Lighting/PCSS Max Radius", 0.05f, 0.001f, 0.2f, 0.001f);
 
+    NumVar m_BoxARoughness("Sponza/Geometry/Box A Roughness", 0.30f, 0.0f, 1.0f, 0.01f);
+
     // ---- Procedural scene geometry (floor, walls, mirror box, ceiling, light) -----
     static const UINT kNumProcSurfaces = 8;
     static const UINT kAreaLightMaterialID = 106;
@@ -653,6 +655,8 @@ void Sponza::RenderScene(
         Vector3  pointLightPos;
         Vector3  pointLightColor;
         Vector4  areaShadowParams;
+        float    boxARoughness;
+        float    _pad[3];
     } psConstants;
 
     psConstants.sunDirection = m_SunDirection;
@@ -673,6 +677,8 @@ void Sponza::RenderScene(
     psConstants.pointLightColor   = m_PointLightColor;
     psConstants.areaShadowParams  = Vector4(
         0.02f, 2.5f, (float)m_PCSSLightSize, (float)m_PCSSMaxRadius);
+    psConstants.boxARoughness     = (float)m_BoxARoughness;
+    psConstants._pad[0] = psConstants._pad[1] = psConstants._pad[2] = 0.0f;
 
     // Set the default state for command lists
     auto& pfnSetupGraphicsState = [&](void)

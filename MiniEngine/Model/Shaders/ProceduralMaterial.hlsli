@@ -25,21 +25,23 @@ struct ProcMat
     float  ao;
 };
 
-ProcMat GetProceduralMaterial(uint matID)
+// boxARoughness: runtime-controlled roughness for Box A (matID 104).
+// Box B (matID 108) is kept as a perfect-mirror reference (roughness = 0.02).
+ProcMat GetProceduralMaterial(uint matID, float boxARoughness)
 {
     ProcMat m;
     m.ao = 1.0;
     [branch] switch (matID)
     {
-    case 100: m.baseColor = float3(0.800, 0.800, 0.820); m.metallic = 0.85; m.roughness = 0.15; break; // floor (polished metal for Depth-2 bounce)
-    case 101: m.baseColor = float3(0.630, 0.060, 0.050); m.metallic = 0.0; m.roughness = 0.95; break; // red wall
-    case 102: m.baseColor = float3(0.140, 0.450, 0.090); m.metallic = 0.0; m.roughness = 0.95; break; // green wall
-    case 103: m.baseColor = float3(0.720, 0.710, 0.680); m.metallic = 0.0; m.roughness = 0.92; break; // back wall
-    case 104: m.baseColor = float3(0.950, 0.950, 0.950); m.metallic = 1.0; m.roughness = 0.02; break; // mirror box
-    case 105: m.baseColor = float3(0.720, 0.710, 0.680); m.metallic = 0.0; m.roughness = 0.95; break; // ceiling
-    case 106: m.baseColor = float3(1.000, 0.950, 0.800); m.metallic = 0.0; m.roughness = 1.00; break; // area light
-    case 108: m.baseColor = float3(0.950, 0.950, 0.950); m.metallic = 1.0; m.roughness = 0.02; break; // mirror box B
-    default:  m.baseColor = float3(0.500, 0.500, 0.500); m.metallic = 0.0; m.roughness = 0.90; break;
+    case 100: m.baseColor = float3(0.800, 0.800, 0.820); m.metallic = 0.85; m.roughness = 0.15;           break; // floor
+    case 101: m.baseColor = float3(0.630, 0.060, 0.050); m.metallic = 0.0;  m.roughness = 0.95;           break; // red wall
+    case 102: m.baseColor = float3(0.140, 0.450, 0.090); m.metallic = 0.0;  m.roughness = 0.95;           break; // green wall
+    case 103: m.baseColor = float3(0.720, 0.710, 0.680); m.metallic = 0.0;  m.roughness = 0.92;           break; // back wall
+    case 104: m.baseColor = float3(0.950, 0.950, 0.950); m.metallic = 1.0;  m.roughness = boxARoughness;  break; // Box A (glossy test)
+    case 105: m.baseColor = float3(0.720, 0.710, 0.680); m.metallic = 0.0;  m.roughness = 0.95;           break; // ceiling
+    case 106: m.baseColor = float3(1.000, 0.950, 0.800); m.metallic = 0.0;  m.roughness = 1.00;           break; // area light
+    case 108: m.baseColor = float3(0.950, 0.950, 0.950); m.metallic = 1.0;  m.roughness = 0.02;           break; // Box B (mirror reference)
+    default:  m.baseColor = float3(0.500, 0.500, 0.500); m.metallic = 0.0;  m.roughness = 0.90;           break;
     }
     return m;
 }
