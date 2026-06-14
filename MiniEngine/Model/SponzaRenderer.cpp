@@ -568,7 +568,8 @@ static void RenderProceduralSurfaces(
         if (withMaterials)
         {
             ctx.SetDescriptorTable(Renderer::kMaterialSRVs, s.srvHandle);
-            ctx.SetDynamicConstantBufferView(Renderer::kCommonCBV, sizeof(uint32_t), &s.materialID);
+            __declspec(align(16)) uint32_t matID = s.materialID;
+            ctx.SetDynamicConstantBufferView(Renderer::kCommonCBV, sizeof(uint32_t), &matID);
         }
         ctx.DrawIndexed(s.indexCount, 0, 0);
     }
