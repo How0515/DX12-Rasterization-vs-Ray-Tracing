@@ -225,6 +225,7 @@
     </ProjectReference>
     <FxCompile>
       <EnableDebuggingInformation Condition="'$(Configuration)'!='Release'">false</EnableDebuggingInformation>
+      <AdditionalIncludeDirectories>..\..\..\..\..\MiniEngine\Model\Shaders;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </FxCompile>
   </ItemDefinitionGroup>
   <ImportGroup Label="ExtensionTargets">

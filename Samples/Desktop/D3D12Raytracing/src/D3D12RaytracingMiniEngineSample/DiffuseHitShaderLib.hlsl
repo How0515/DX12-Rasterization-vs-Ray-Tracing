@@ -14,6 +14,7 @@
 #define HLSL
 #include "ModelViewerRaytracing.h"
 #include "RayTracingHlslCompat.h"
+#include "PBR.hlsli"
 
 cbuffer Material : register(b3)
 {
@@ -413,26 +414,44 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
     float  ao            = ormSample.r;
     float  roughness     = ormSample.g;
     float  metallic      = ormSample.b;
-    float  specularMask  = 1.0 - roughness;
-    float  gloss         = lerp(2.0, 128.0, (1.0 - roughness) * (1.0 - roughness));
-    float3 specularAlbedo  = lerp(float3(0.04, 0.04, 0.04), diffuseColor, metallic);
-    float3 diffuseContrib  = diffuseColor * (1.0 - metallic);
+    float3 specularAlbedo = lerp(float3(0.04, 0.04, 0.04), diffuseColor, metallic); // F0
+    float3 diffuseContrib = diffuseColor * (1.0 - metallic);
 
     float3 normal;
     {
-        normal = g_localNormal.SampleGrad(g_s0, uv, ddxUV, ddyUV).rgb * 2.0 - 1.0;
-        AntiAliasSpecular(normal, gloss);
+        normal = normalize(g_localNormal.SampleGrad(g_s0, uv, ddxUV, ddyUV).rgb * 2.0 - 1.0);
         float3x3 tbn = float3x3(vsTangent, vsBitangent, vsNormal);
         normal = normalize(mul(normal, tbn));
     }
 
-    float3 outputColor = AmbientColor * diffuseColor * texSSAO[DispatchRaysIndex().xy] * ao;
+    // normalize(-WorldRayDirection()) = surface→camera = V (correct PBR convention; no sign flip needed)
+    const float3 V = normalize(-WorldRayDirection());
 
-    const float3 viewDir = normalize(-WorldRayDirection());
+    float3 outputColor = AmbientPBR(diffuseContrib, specularAlbedo, texSSAO[DispatchRaysIndex().xy] * ao, AmbientColor);
 
-    outputColor += ApplyRectAreaLightApprox(
-        diffuseContrib, specularAlbedo, specularMask, gloss,
-        normal, viewDir, worldPosition);
+    // Area light: stochastic samples with per-sample RT shadow rays
+    {
+        float2 gridRotation = GetAreaLightGridRotation(DispatchRaysIndex().xy);
+        [loop]
+        for (uint li = 0; li < kAreaLightSampleCount; ++li)
+        {
+            float2 sampleOffset = GetAreaLightSampleOffset(li, gridRotation);
+            float3 samplePos    = PointLightPos.xyz + float3(sampleOffset.x, 0.0f, sampleOffset.y);
+            float  visibility   = TraceAreaLightSampleVisibility(worldPosition, normal, samplePos);
+            float3 L            = samplePos - worldPosition;
+            float  invDist      = rsqrt(dot(L, L));
+            L *= invDist;
+
+            float distFalloff = 9.0f * invDist * invDist;
+            distFalloff = max(0.0f, distFalloff - rsqrt(distFalloff));
+
+            outputColor += distFalloff * EvaluatePBR(
+                diffuseContrib, specularAlbedo, roughness,
+                normal, V, L,
+                PointLightColor.xyz / kAreaLightSampleCount,
+                visibility);
+        }
+    }
 
     // Debug view override
     if (DebugView == 1)      outputColor = float3(ao, ao, ao);
