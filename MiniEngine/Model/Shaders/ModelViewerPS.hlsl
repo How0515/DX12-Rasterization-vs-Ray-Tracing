@@ -14,6 +14,12 @@
 #define SINGLE_SAMPLE
 #include "Lighting.hlsli"
 #include "PBR.hlsli"
+#include "ProceduralMaterial.hlsli"
+
+cbuffer MatCBV : register(b1)
+{
+    uint MaterialID;
+}
 
 Texture2D<float3> texDiffuse		: register(t0);
 Texture2D<float3> texORM			: register(t1);	// R=Occlusion, G=Roughness, B=Metallic
@@ -50,12 +56,26 @@ MRT main(VSOutput vsOutput)
 	uint2 pixelPos = uint2(vsOutput.position.xy);
 # define SAMPLE_TEX(texName) texName.Sample(defaultSampler, vsOutput.uv)
 
-    float3 diffuseAlbedo = SAMPLE_TEX(texDiffuse);
+    float3 diffuseAlbedo;
+    float  ao, roughness, metallic;
 
-    float3 ormSample      = SAMPLE_TEX(texORM);
-    float  ao             = ormSample.r;
-    float  roughness      = ormSample.g;
-    float  metallic       = ormSample.b;
+    if (MaterialID >= 100)
+    {
+        ProcMat pm    = GetProceduralMaterial(MaterialID);
+        diffuseAlbedo = pm.baseColor;
+        metallic      = pm.metallic;
+        roughness     = pm.roughness;
+        ao            = pm.ao;
+    }
+    else
+    {
+        diffuseAlbedo       = SAMPLE_TEX(texDiffuse);
+        float3 ormSample    = SAMPLE_TEX(texORM);
+        ao                  = ormSample.r;
+        roughness           = ormSample.g;
+        metallic            = ormSample.b;
+    }
+
     float3 specularAlbedo = lerp(float3(0.04, 0.04, 0.04), diffuseAlbedo, metallic); // F0
     float3 diffuseContrib = diffuseAlbedo * (1.0 - metallic);
 

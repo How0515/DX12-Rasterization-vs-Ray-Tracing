@@ -15,6 +15,7 @@
 #include "ModelViewerRaytracing.h"
 #include "RayTracingHlslCompat.h"
 #include "PBR.hlsli"
+#include "ProceduralMaterial.hlsli"
 
 cbuffer Material : register(b3)
 {
@@ -249,22 +250,6 @@ float3 BarycentricCoordinates(float3 pt, float3 v0, float3 v1, float3 v2)
     return float3(u, v, w);
 }
 
-// Diffuse colours for procedural surfaces — must match SponzaRenderer.cpp cols[].
-float3 GetProceduralColor(uint matID)
-{
-    switch (matID)
-    {
-        case 100: return float3(0.725f, 0.710f, 0.680f); // floor
-        case 101: return float3(0.630f, 0.060f, 0.050f); // red wall   빨간색
-        case 102: return float3(0.140f, 0.450f, 0.090f); // green wall 초록색
-        case 103: return float3(0.720f, 0.710f, 0.680f); // back wall  파란색
-        case 104: return float3(0.900f, 0.400f, 0.050f); // box        주황색
-        case 105: return float3(0.720f, 0.710f, 0.680f); // ceiling
-        case 106: return float3(1.000f, 0.950f, 0.800f); // area light panel
-        default:  return float3(1.0f, 0.0f, 0.0f);       // unknown: debug red
-    }
-}
-
 // World-space outward normals for procedural surfaces.
 // Box (matID 104): each face = 2 triangles, ordered top/front/back/left/right/bottom.
 float3 GetProceduralNormal(uint matID, uint primIdx)
@@ -275,6 +260,7 @@ float3 GetProceduralNormal(uint matID, uint primIdx)
     if (matID == 103) return float3( 0,  0, -1);  // back wall
     if (matID == 105) return float3( 0, -1,  0);  // ceiling
     if (matID == 106) return float3( 0, -1,  0);  // area light panel
+    if (matID == 107) return float3( 0,  1,  0);  // mirror plate (upward)
     if (matID == 104)
     {
         if (primIdx <  2) return float3( 0,  1,  0);  // top
@@ -299,30 +285,61 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
     uint materialID = MaterialID;
     uint triangleID = PrimitiveIndex();
 
-    // Procedural surfaces (floor/walls/box): g_meshInfo is sized for the helmet only.
+    // Procedural surfaces (floor/walls/box/mirror): g_meshInfo is sized for the helmet only.
     // Bypass mesh attribute loading and use hardcoded geometry data instead.
     if (materialID >= 100)
     {
-        float3 worldPos    = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
-        float3 diffuse     = GetProceduralColor(materialID);
-        float3 normal      = GetProceduralNormal(materialID, PrimitiveIndex());
-        float3 viewDir     = normalize(-WorldRayDirection());
+        float3 worldPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
+        float3 normal   = GetProceduralNormal(materialID, PrimitiveIndex());
+        float3 V        = normalize(-WorldRayDirection());
 
         if (materialID == 106)
         {
-            g_screenOutput[DispatchRaysIndex().xy] = float4(diffuse, 1.0f);
+            ProcMat lm = GetProceduralMaterial(106);
+            g_screenOutput[DispatchRaysIndex().xy] = float4(lm.baseColor, 1.0f);
             return;
         }
 
-        float3 out3 = AmbientColor * diffuse * texSSAO[DispatchRaysIndex().xy];
-        out3 += ApplyRectAreaLightApprox(
-            diffuse, float3(0.56f, 0.56f, 0.56f), 0.0f, 128.0f,
-            normal, viewDir, worldPos);
+        ProcMat pm         = GetProceduralMaterial(materialID);
+        float3 diffuseContrib = pm.baseColor * (1.0 - pm.metallic);
+        float3 specularAlbedo = lerp(float3(0.04, 0.04, 0.04), pm.baseColor, pm.metallic);
+        float  roughness      = pm.roughness;
 
-        if (IsReflection)
-            out3 = g_screenOutput[DispatchRaysIndex().xy].rgb + out3;
+        float3 outputColor = AmbientPBR(
+            diffuseContrib, specularAlbedo,
+            texSSAO[DispatchRaysIndex().xy] * pm.ao,
+            AmbientColor);
 
-        g_screenOutput[DispatchRaysIndex().xy] = float4(out3, 1.0f);
+        float2 gridRotation = GetAreaLightGridRotation(DispatchRaysIndex().xy);
+        [loop]
+        for (uint li = 0; li < kAreaLightSampleCount; ++li)
+        {
+            float2 sampleOffset = GetAreaLightSampleOffset(li, gridRotation);
+            float3 samplePos    = PointLightPos.xyz + float3(sampleOffset.x, 0.0f, sampleOffset.y);
+            float  visibility   = TraceAreaLightSampleVisibility(worldPos, normal, samplePos);
+            float3 L            = samplePos - worldPos;
+            float  invDist      = rsqrt(dot(L, L));
+            L *= invDist;
+
+            float distFalloff = 9.0f * invDist * invDist;
+            distFalloff = max(0.0f, distFalloff - rsqrt(distFalloff));
+
+            outputColor += distFalloff * EvaluatePBR(
+                diffuseContrib, specularAlbedo, roughness,
+                normal, V, L,
+                PointLightColor.xyz / kAreaLightSampleCount,
+                visibility);
+        }
+
+        if (DebugView == 1)      outputColor = float3(pm.ao, pm.ao, pm.ao);
+        else if (DebugView == 2) outputColor = float3(roughness, roughness, roughness);
+        else if (DebugView == 3) outputColor = float3(pm.metallic, pm.metallic, pm.metallic);
+        else if (DebugView == 4) outputColor = normal * 0.5 + 0.5;
+
+        if (DebugView == 0 && IsReflection)
+            outputColor = g_screenOutput[DispatchRaysIndex().xy].rgb + outputColor;
+
+        g_screenOutput[DispatchRaysIndex().xy] = float4(outputColor, 1.0f);
         return;
     }
 
