@@ -91,17 +91,14 @@ float GetDirectionalShadow( float3 ShadowCoord, Texture2D<float> texShadow )
     return result * result;
 }
 
-static const float2 kPCSSSamples[16] =
+static const uint kPCSSGridDim = 8;
+static const uint kPCSSSampleCount = kPCSSGridDim * kPCSSGridDim;
+
+float2 GetPCSSGridOffset(uint sampleIndex)
 {
-    float2(-0.94201624f, -0.39906216f), float2( 0.94558609f, -0.76890725f),
-    float2(-0.09418410f, -0.92938870f), float2( 0.34495938f,  0.29387760f),
-    float2(-0.91588581f,  0.45771432f), float2(-0.81544232f, -0.87912464f),
-    float2(-0.38277543f,  0.27676845f), float2( 0.97484398f,  0.75648379f),
-    float2( 0.44323325f, -0.97511554f), float2( 0.53742981f, -0.47373420f),
-    float2(-0.26496911f, -0.41893023f), float2( 0.79197514f,  0.19090188f),
-    float2(-0.24188840f,  0.99706507f), float2(-0.81409955f,  0.91437590f),
-    float2( 0.19984126f,  0.78641367f), float2( 0.14383161f, -0.14100790f)
-};
+    float2 gridPosition = float2(sampleIndex % kPCSSGridDim, sampleIndex / kPCSSGridDim);
+    return gridPosition * (2.0f / (kPCSSGridDim - 1.0f)) - 1.0f;
+}
 
 float LinearizeAreaShadowDepth(float depth)
 {
@@ -131,9 +128,9 @@ float GetAreaLightPCSS(float4 shadowCoordH, Texture2D<float> texShadow)
     float blockerDepthSum = 0.0f;
     uint blockerCount = 0;
     [unroll]
-    for (uint i = 0; i < 16; ++i)
+    for (uint i = 0; i < kPCSSSampleCount; ++i)
     {
-        int2 sampleCoord = int2(shadowCoord.xy * shadowSize + kPCSSSamples[i] * searchRadiusUV * shadowSize);
+        int2 sampleCoord = int2(shadowCoord.xy * shadowSize + GetPCSSGridOffset(i) * searchRadiusUV * shadowSize);
         sampleCoord = clamp(sampleCoord, int2(0, 0), int2(shadowWidth - 1, shadowHeight - 1));
         float sampleDepth = texShadow.Load(int3(sampleCoord, 0));
 
@@ -157,14 +154,14 @@ float GetAreaLightPCSS(float4 shadowCoordH, Texture2D<float> texShadow)
 
     float visibility = 0.0f;
     [unroll]
-    for (uint j = 0; j < 16; ++j)
+    for (uint j = 0; j < kPCSSSampleCount; ++j)
     {
         visibility += texShadow.SampleCmpLevelZero(
             shadowSampler,
-            shadowCoord.xy + kPCSSSamples[j] * filterRadiusUV,
+            shadowCoord.xy + GetPCSSGridOffset(j) * filterRadiusUV,
             shadowCoord.z);
     }
-    return visibility / 16.0f;
+    return visibility / kPCSSSampleCount;
 }
 
 float GetShadowConeLight(uint lightIndex, float3 shadowCoord)

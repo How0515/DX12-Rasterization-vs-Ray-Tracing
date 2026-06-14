@@ -34,14 +34,15 @@ Texture2D<float4> g_localNormal : register(t7);
 Texture2D<float4>   normals  : register(t13);
 
 static const float kShadowRayEpsilon = 1e-5f;
-static const uint kAreaLightSampleCount = 16;
-static const float2 kAreaLightSampleOffsets[kAreaLightSampleCount] =
+static const uint kAreaLightGridDim = 8;
+static const uint kAreaLightSampleCount = kAreaLightGridDim * kAreaLightGridDim;
+
+float2 GetAreaLightSampleOffset(uint sampleIndex)
 {
-    float2(-0.18f, -0.12f), float2(-0.06f, -0.12f), float2( 0.06f, -0.12f), float2( 0.18f, -0.12f),
-    float2(-0.18f, -0.04f), float2(-0.06f, -0.04f), float2( 0.06f, -0.04f), float2( 0.18f, -0.04f),
-    float2(-0.18f,  0.04f), float2(-0.06f,  0.04f), float2( 0.06f,  0.04f), float2( 0.18f,  0.04f),
-    float2(-0.18f,  0.12f), float2(-0.06f,  0.12f), float2( 0.06f,  0.12f), float2( 0.18f,  0.12f)
-};
+    float2 gridPosition = float2(sampleIndex % kAreaLightGridDim, sampleIndex / kAreaLightGridDim);
+    float2 normalizedOffset = gridPosition * (2.0f / (kAreaLightGridDim - 1.0f)) - 1.0f;
+    return normalizedOffset * float2(0.18f, 0.12f);
+}
 
 uint3 Load3x16BitIndices(
     uint offsetBytes)
@@ -177,7 +178,8 @@ float3 ApplyRectAreaLightApprox(
     [unroll]
     for (uint i = 0; i < kAreaLightSampleCount; ++i)
     {
-        float3 samplePos = PointLightPos.xyz + float3(kAreaLightSampleOffsets[i].x, 0.0f, kAreaLightSampleOffsets[i].y);
+        float2 sampleOffset = GetAreaLightSampleOffset(i);
+        float3 samplePos = PointLightPos.xyz + float3(sampleOffset.x, 0.0f, sampleOffset.y);
         float visibility = TraceAreaLightSampleVisibility(worldPos, normal, samplePos);
         float3 toLight = samplePos - worldPos;
         float distSq = dot(toLight, toLight);
