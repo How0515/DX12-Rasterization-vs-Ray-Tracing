@@ -1192,6 +1192,8 @@ void RaytracebarycentricsSSR(
     memcpy(&inputs.worldCameraPosition, &camera.GetPosition(), sizeof(inputs.worldCameraPosition));
     inputs.resolution.x = (float)colorTarget.GetWidth();
     inputs.resolution.y = (float)colorTarget.GetHeight();
+    auto m2 = Transpose(m0);  // worldToClip: view-proj transposed for HLSL row-major
+    memcpy(&inputs.worldToClip, &m2, sizeof(inputs.worldToClip));
 
     HitShaderConstants hitShaderConstants = {};
     hitShaderConstants.IsReflection = false;
