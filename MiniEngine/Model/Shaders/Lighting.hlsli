@@ -29,7 +29,9 @@ cbuffer PSConstants : register(b0)
 
     uint FrameIndexMod2;
     uint DebugView;
-    // implicit 8-byte pad → offset 128
+    // Named fields occupy the 8-byte slot before the aligned point-light vectors.
+    uint RasterShadowsEnabled;
+    uint Padding;
     float4 PointLightPos;    // xyz = world position, w = unused
     float4 PointLightColor;  // xyz = radiance, w = unused
     float4 AreaShadowParams; // x = near, y = far, z = light size in UV, w = max PCSS radius in UV
@@ -132,6 +134,9 @@ float LinearizeAreaShadowDepth(float depth)
 
 float GetAreaLightPCSS(float4 shadowCoordH, Texture2D<float> texShadow)
 {
+    if (RasterShadowsEnabled == 0)
+        return 1.0f;
+
     if (shadowCoordH.w <= 0.0f)
         return 1.0f;
 

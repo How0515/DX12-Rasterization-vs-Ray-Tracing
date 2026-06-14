@@ -657,7 +657,9 @@ void Sponza::RenderScene(
         uint32_t FirstLightIndex[4];
         uint32_t FrameIndexMod2;
         uint32_t debugView;
-        // implicit 8-byte pad → offset 128
+        // Named fields occupy the 8-byte slot before the aligned point-light vectors.
+        uint32_t rasterShadowsEnabled;
+        uint32_t padding;
         Vector3  pointLightPos;
         Vector3  pointLightColor;
         Vector4  areaShadowParams;
@@ -675,6 +677,8 @@ void Sponza::RenderScene(
     psConstants.FirstLightIndex[1] = Lighting::m_FirstConeShadowedLight;
     psConstants.FrameIndexMod2    = FrameIndex;
     psConstants.debugView         = m_DebugView;
+    psConstants.rasterShadowsEnabled = skipShadowMap ? 0u : 1u;
+    psConstants.padding           = 0;
     psConstants.pointLightPos     = m_PointLightPos;
     psConstants.pointLightColor   = m_PointLightColor;
     psConstants.areaShadowParams  = Vector4(

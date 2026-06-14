@@ -1037,20 +1037,32 @@ void D3D12RaytracingMiniEngineSample::Update( float deltaT )
         DebugZoom.Decrement();
     else if (GameInput::IsFirstPressed(GameInput::kRShoulder))
         DebugZoom.Increment();
+    // Presentation modes: raster no-shadow/shadow-map/SSR, then RT no-shadow/shadow/reflection x1/x2.
     else if(GameInput::IsFirstPressed(GameInput::kKey_1))
-      rayTracingMode = RTM_OFF;
+        rayTracingMode = RTM_SHADOWS;
     else if(GameInput::IsFirstPressed(GameInput::kKey_2))
-      rayTracingMode = RTM_TRAVERSAL;
+        rayTracingMode = RTM_OFF;
     else if(GameInput::IsFirstPressed(GameInput::kKey_3))
-      rayTracingMode = RTM_SSR;
+        rayTracingMode = RTM_SSR;
     else if(GameInput::IsFirstPressed(GameInput::kKey_4))
-      rayTracingMode = RTM_SHADOWS;
+        rayTracingMode = RTM_DIFFUSE_WITH_SHADOWMAPS;
     else if(GameInput::IsFirstPressed(GameInput::kKey_5))
-      rayTracingMode = RTM_DIFFUSE_WITH_SHADOWMAPS;
+        rayTracingMode = RTM_DIFFUSE_WITH_SHADOWRAYS;
     else if(GameInput::IsFirstPressed(GameInput::kKey_6))
-      rayTracingMode = RTM_DIFFUSE_WITH_SHADOWRAYS;
+    {
+        rayTracingMode = RTM_REFLECTIONS;
+        g_MaxRecursionDepth = 1;
+    }
     else if(GameInput::IsFirstPressed(GameInput::kKey_7))
-      rayTracingMode = RTM_REFLECTIONS;
+    {
+        rayTracingMode = RTM_REFLECTIONS;
+        g_MaxRecursionDepth = 2;
+    }
+    else if(GameInput::IsFirstPressed(GameInput::kKey_8))
+    {
+        rayTracingMode = RTM_REFLECTIONS;
+        g_MaxRecursionDepth = 4;
+    }
     
     static bool freezeCamera = false;
     
