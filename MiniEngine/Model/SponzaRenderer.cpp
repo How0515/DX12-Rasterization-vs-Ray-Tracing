@@ -80,7 +80,7 @@ namespace Sponza
     NumVar m_PCSSMaxRadius("Sponza/Lighting/PCSS Max Radius", 0.05f, 0.001f, 0.2f, 0.001f);
 
     // ---- Procedural scene geometry (floor, walls, mirror box, ceiling, light) -----
-    static const UINT kNumProcSurfaces = 7;
+    static const UINT kNumProcSurfaces = 8;
     static const UINT kAreaLightMaterialID = 106;
 
     struct ProcSurface
@@ -280,10 +280,14 @@ void Sponza::Startup( Camera& Camera )
         const float kRoomTop  =  1.45f;
         const float kLightHalfX = 0.28f, kLightHalfZ = 0.20f;
         const float kLightY = kAreaLightPanelY;
-        // Mirror box sits at back-right from camera view (RT reflection comparison object).
-        const float kBoxXMin = -0.65f, kBoxXMax = -0.25f;
-        const float kBoxYMin = kFloorY, kBoxYMax = 0.52f;
-        const float kBoxZMin =  0.10f, kBoxZMax =  0.55f;
+        // Mirror box A — enlarged ~1.5× (40 cm→60 cm wide) and Y-rotated 25°
+        // (pivot cx=-0.45, cz=0.35; sin25=0.42262, cos25=0.90631).
+        // Precomputed rotated corners; naming: [X][Y][Z] where 0=min, 1=max.
+        const float kBoxYMax = 0.78f;
+        float A000[3]={-0.5951f,kFloorY,-0.0487f}, A100[3]={-0.0513f,kFloorY, 0.2049f};
+        float A010[3]={-0.5951f,kBoxYMax,-0.0487f}, A110[3]={-0.0513f,kBoxYMax, 0.2049f};
+        float A001[3]={-0.8487f,kFloorY, 0.4951f}, A101[3]={-0.3049f,kFloorY, 0.7487f};
+        float A011[3]={-0.8487f,kBoxYMax, 0.4951f}, A111[3]={-0.3049f,kBoxYMax, 0.7487f};
 
         // Surface diffuse colours — must match ProceduralMaterial.hlsli baseColor values.
         struct SurfCol { float r, g, b; } cols[kNumProcSurfaces] = {
@@ -291,11 +295,12 @@ void Sponza::Startup( Camera& Camera )
             {0.630f, 0.060f, 0.050f},   // red wall
             {0.140f, 0.450f, 0.090f},   // green wall
             {0.720f, 0.710f, 0.680f},   // back wall
-            {0.950f, 0.950f, 0.950f},   // mirror box (silver)
+            {0.950f, 0.950f, 0.950f},   // mirror box A (silver, rotated)
             {0.720f, 0.710f, 0.680f},   // ceiling
             {1.000f, 0.950f, 0.800f},   // area light panel
+            {0.950f, 0.950f, 0.950f},   // mirror box B (silver, axis-aligned)
         };
-        const UINT matIDs[kNumProcSurfaces] = {100, 101, 102, 103, 104, 105, kAreaLightMaterialID};
+        const UINT matIDs[kNumProcSurfaces] = {100, 101, 102, 103, 104, 105, kAreaLightMaterialID, 108};
 
         // FillQuad: writes 4 vertices (pos+normal+tangent+bitangent) and 6 indices.
         // Indices are CCW to match MiniEngine's RasterizerDefault (FrontCounterClockwise=TRUE).
@@ -358,32 +363,20 @@ void Sponza::Startup( Camera& Camera )
           m_procSurfaces[3].vb.Create(L"ProcWhiteWall VB", 4, sizeof(SceneVertex), tmpV);
           m_procSurfaces[3].ib.Create(L"ProcWhiteWall IB", 6, sizeof(uint16_t),    tmpI); }
 
-        // 4 – Box occluder (6 faces: top, front, back, left, right, bottom)
+        // 4 – Mirror box A (enlarged, Y-rotated 25°; 6 faces: top/front/back/left/right/bottom)
         { memset(tmpV, 0, sizeof(tmpV)); memset(tmpI, 0, sizeof(tmpI));
-          { const float p0[3]={kBoxXMin,kBoxYMax,kBoxZMin}, p1[3]={kBoxXMax,kBoxYMax,kBoxZMin},
-                        p2[3]={kBoxXMax,kBoxYMax,kBoxZMax},  p3[3]={kBoxXMin,kBoxYMax,kBoxZMax};
-            const float n[3]={0,1,0},  t[3]={1,0,0},  bt[3]={0,0,-1};
-            FillQuad(tmpV+0, tmpI+0, 0, p0,p1,p2,p3, n,t,bt); }     // top
-          { const float p0[3]={kBoxXMin,kBoxYMax,kBoxZMin}, p1[3]={kBoxXMin,kBoxYMin,kBoxZMin},
-                        p2[3]={kBoxXMax,kBoxYMin,kBoxZMin},  p3[3]={kBoxXMax,kBoxYMax,kBoxZMin};
-            const float n[3]={0,0,-1}, t[3]={1,0,0},  bt[3]={0,1,0};
-            FillQuad(tmpV+4, tmpI+6, 4, p0,p1,p2,p3, n,t,bt); }     // front
-          { const float p0[3]={kBoxXMax,kBoxYMax,kBoxZMax}, p1[3]={kBoxXMax,kBoxYMin,kBoxZMax},
-                        p2[3]={kBoxXMin,kBoxYMin,kBoxZMax},  p3[3]={kBoxXMin,kBoxYMax,kBoxZMax};
-            const float n[3]={0,0,1},  t[3]={-1,0,0}, bt[3]={0,1,0};
-            FillQuad(tmpV+8,  tmpI+12, 8,  p0,p1,p2,p3, n,t,bt); }  // back
-          { const float p0[3]={kBoxXMin,kBoxYMax,kBoxZMax}, p1[3]={kBoxXMin,kBoxYMin,kBoxZMax},
-                        p2[3]={kBoxXMin,kBoxYMin,kBoxZMin},  p3[3]={kBoxXMin,kBoxYMax,kBoxZMin};
-            const float n[3]={-1,0,0}, t[3]={0,1,0},  bt[3]={0,0,-1};
-            FillQuad(tmpV+12, tmpI+18, 12, p0,p1,p2,p3, n,t,bt); }  // left
-          { const float p0[3]={kBoxXMax,kBoxYMax,kBoxZMin}, p1[3]={kBoxXMax,kBoxYMin,kBoxZMin},
-                        p2[3]={kBoxXMax,kBoxYMin,kBoxZMax},  p3[3]={kBoxXMax,kBoxYMax,kBoxZMax};
-            const float n[3]={1,0,0},  t[3]={0,1,0},  bt[3]={0,0,1};
-            FillQuad(tmpV+16, tmpI+24, 16, p0,p1,p2,p3, n,t,bt); }  // right
-          { const float p0[3]={kBoxXMin,kBoxYMin,kBoxZMax}, p1[3]={kBoxXMax,kBoxYMin,kBoxZMax},
-                        p2[3]={kBoxXMax,kBoxYMin,kBoxZMin},  p3[3]={kBoxXMin,kBoxYMin,kBoxZMin};
-            const float n[3]={0,-1,0}, t[3]={1,0,0},  bt[3]={0,0,1};
-            FillQuad(tmpV+20, tmpI+30, 20, p0,p1,p2,p3, n,t,bt); }  // bottom
+          { const float n[3]={ 0.f,     1.f,      0.f},    t[3]={ 0.9063f,0.f, 0.4226f}, bt[3]={ 0.4226f,0.f,-0.9063f};
+            FillQuad(tmpV+0,  tmpI+0,  0,  A010,A110,A111,A011, n,t,bt); }  // top
+          { const float n[3]={ 0.4226f, 0.f,-0.9063f},     t[3]={ 0.9063f,0.f, 0.4226f}, bt[3]={ 0.f,1.f,0.f};
+            FillQuad(tmpV+4,  tmpI+6,  4,  A010,A000,A100,A110, n,t,bt); }  // front (Zmin)
+          { const float n[3]={-0.4226f, 0.f, 0.9063f},     t[3]={-0.9063f,0.f,-0.4226f}, bt[3]={ 0.f,1.f,0.f};
+            FillQuad(tmpV+8,  tmpI+12, 8,  A111,A101,A001,A011, n,t,bt); }  // back  (Zmax)
+          { const float n[3]={-0.9063f, 0.f,-0.4226f},     t[3]={ 0.f,1.f,0.f},          bt[3]={ 0.4226f,0.f,-0.9063f};
+            FillQuad(tmpV+12, tmpI+18, 12, A011,A001,A000,A010, n,t,bt); }  // left  (Xmin)
+          { const float n[3]={ 0.9063f, 0.f, 0.4226f},     t[3]={ 0.f,1.f,0.f},          bt[3]={-0.4226f,0.f, 0.9063f};
+            FillQuad(tmpV+16, tmpI+24, 16, A110,A100,A101,A111, n,t,bt); }  // right (Xmax)
+          { const float n[3]={ 0.f,    -1.f,      0.f},    t[3]={ 0.9063f,0.f, 0.4226f}, bt[3]={-0.4226f,0.f, 0.9063f};
+            FillQuad(tmpV+20, tmpI+30, 20, A001,A101,A100,A000, n,t,bt); }  // bottom
           vcnt[4]=24; icnt[4]=36;
           m_procSurfaces[4].vb.Create(L"ProcBox VB", 24, sizeof(SceneVertex), tmpV);
           m_procSurfaces[4].ib.Create(L"ProcBox IB", 36, sizeof(uint16_t),    tmpI); }
@@ -418,6 +411,38 @@ void Sponza::Startup( Camera& Camera )
           vcnt[6]=4; icnt[6]=6;
           m_procSurfaces[6].vb.Create(L"ProcAreaLight VB", 4, sizeof(SceneVertex), tmpV);
           m_procSurfaces[6].ib.Create(L"ProcAreaLight IB", 6, sizeof(uint16_t), tmpI); }
+
+        // 7 – Mirror box B (axis-aligned; right side, faces Box A for mirror-in-mirror bounce).
+        // X: 0.15→0.75, Z: 0.10→0.55, Y: floor→0.78.  MatID 108 (same silver PBR as 104).
+        { const float kBXMin=0.15f,kBXMax=0.75f,kBYMax=0.78f,kBZMin=0.10f,kBZMax=0.55f;
+          memset(tmpV, 0, sizeof(tmpV)); memset(tmpI, 0, sizeof(tmpI));
+          { const float p0[3]={kBXMin,kBYMax,kBZMin},p1[3]={kBXMax,kBYMax,kBZMin},
+                        p2[3]={kBXMax,kBYMax,kBZMax},p3[3]={kBXMin,kBYMax,kBZMax};
+            const float n[3]={0,1,0},t[3]={1,0,0},bt[3]={0,0,-1};
+            FillQuad(tmpV+0, tmpI+0, 0, p0,p1,p2,p3, n,t,bt); }   // top
+          { const float p0[3]={kBXMin,kBYMax,kBZMin},p1[3]={kBXMin,kFloorY,kBZMin},
+                        p2[3]={kBXMax,kFloorY,kBZMin},p3[3]={kBXMax,kBYMax,kBZMin};
+            const float n[3]={0,0,-1},t[3]={1,0,0},bt[3]={0,1,0};
+            FillQuad(tmpV+4, tmpI+6, 4, p0,p1,p2,p3, n,t,bt); }   // front
+          { const float p0[3]={kBXMax,kBYMax,kBZMax},p1[3]={kBXMax,kFloorY,kBZMax},
+                        p2[3]={kBXMin,kFloorY,kBZMax},p3[3]={kBXMin,kBYMax,kBZMax};
+            const float n[3]={0,0,1},t[3]={-1,0,0},bt[3]={0,1,0};
+            FillQuad(tmpV+8,  tmpI+12, 8,  p0,p1,p2,p3, n,t,bt); }  // back
+          { const float p0[3]={kBXMin,kBYMax,kBZMax},p1[3]={kBXMin,kFloorY,kBZMax},
+                        p2[3]={kBXMin,kFloorY,kBZMin},p3[3]={kBXMin,kBYMax,kBZMin};
+            const float n[3]={-1,0,0},t[3]={0,1,0},bt[3]={0,0,-1};
+            FillQuad(tmpV+12, tmpI+18, 12, p0,p1,p2,p3, n,t,bt); }  // left
+          { const float p0[3]={kBXMax,kBYMax,kBZMin},p1[3]={kBXMax,kFloorY,kBZMin},
+                        p2[3]={kBXMax,kFloorY,kBZMax},p3[3]={kBXMax,kBYMax,kBZMax};
+            const float n[3]={1,0,0},t[3]={0,1,0},bt[3]={0,0,1};
+            FillQuad(tmpV+16, tmpI+24, 16, p0,p1,p2,p3, n,t,bt); }  // right
+          { const float p0[3]={kBXMin,kFloorY,kBZMax},p1[3]={kBXMax,kFloorY,kBZMax},
+                        p2[3]={kBXMax,kFloorY,kBZMin},p3[3]={kBXMin,kFloorY,kBZMin};
+            const float n[3]={0,-1,0},t[3]={1,0,0},bt[3]={0,0,1};
+            FillQuad(tmpV+20, tmpI+30, 20, p0,p1,p2,p3, n,t,bt); }  // bottom
+          vcnt[7]=24; icnt[7]=36;
+          m_procSurfaces[7].vb.Create(L"ProcBoxB VB", 24, sizeof(SceneVertex), tmpV);
+          m_procSurfaces[7].ib.Create(L"ProcBoxB IB", 36, sizeof(uint16_t),    tmpI); }
 
         // Finalise per-surface metadata and allocate SRV descriptors.
         UINT descSize = Renderer::s_TextureHeap.GetDescriptorSize();

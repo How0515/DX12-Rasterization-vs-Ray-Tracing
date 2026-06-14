@@ -267,12 +267,21 @@ float3 GetProceduralNormal(uint matID, uint primIdx)
     if (matID == 103) return float3( 0,  0, -1);  // back wall
     if (matID == 105) return float3( 0, -1,  0);  // ceiling
     if (matID == 106) return float3( 0, -1,  0);  // area light panel
-    if (matID == 104)
+    if (matID == 104)  // Box A: Y-rotated 25° (sin=0.4226, cos=0.9063)
+    {
+        if (primIdx <  2) return float3( 0,       1,      0);       // top
+        if (primIdx <  4) return float3( 0.4226f, 0, -0.9063f);     // front (Zmin)
+        if (primIdx <  6) return float3(-0.4226f, 0,  0.9063f);     // back  (Zmax)
+        if (primIdx <  8) return float3(-0.9063f, 0, -0.4226f);     // left  (Xmin)
+        if (primIdx < 10) return float3( 0.9063f, 0,  0.4226f);     // right (Xmax)
+                          return float3( 0,      -1,      0);       // bottom
+    }
+    if (matID == 108)  // Box B: axis-aligned (mirrors Box A across room center)
     {
         if (primIdx <  2) return float3( 0,  1,  0);  // top
         if (primIdx <  4) return float3( 0,  0, -1);  // front
         if (primIdx <  6) return float3( 0,  0,  1);  // back
-        if (primIdx <  8) return float3(-1,  0,  0);  // left
+        if (primIdx <  8) return float3(-1,  0,  0);  // left  (faces Box A)
         if (primIdx < 10) return float3( 1,  0,  0);  // right
                           return float3( 0, -1,  0);  // bottom
     }

@@ -101,9 +101,9 @@ enum RaytracingTypes
     NumTypes
 };
 
-const static UINT MaxRayRecursion = 3;  // primary(1) + reflection(2) + shadow-in-refl(3)
+const static UINT MaxRayRecursion = 5;  // primary(1) + refl×4(5); shadows blocked at callerDepth≥2
 
-const static UINT c_NumCameraPositions = 5;
+const static UINT c_NumCameraPositions = 8;
 
 struct RaytracingDispatchRayInputs
 {
@@ -278,7 +278,8 @@ enum RaytracingMode
     RTM_REFLECTIONS,
 };
 EnumVar rayTracingMode("Application/Raytracing/RayTraceMode", RTM_OFF, _countof(rayTracingModes), rayTracingModes);
-NumVar g_MaxRecursionDepth("Application/Raytracing/MaxRecursionDepth", 1, 0, 2);
+const char* reflectionDepthLabels[] = { "0 - Off", "1", "2", "4" };
+EnumVar g_MaxRecursionDepth("Application/Raytracing/MaxRecursionDepth", 1, 4, reflectionDepthLabels);
 
 const char* debugViewModes[] = { "None", "AO", "Roughness", "Metallic", "Normal" };
 EnumVar g_DebugView("Application/Debug View", 0, _countof(debugViewModes), debugViewModes);
@@ -989,6 +990,24 @@ m_CameraPosArray[4].position = Vector3(0.0f, 1.65f, -3.55f);
 m_CameraPosArray[4].heading  = 3.14159f;
 m_CameraPosArray[4].pitch    = -0.32f;
 
+// 5. SSR Artifact: Screen-Edge — floor reflection exits screen boundary.
+//    Camera grazes the metallic floor; reflected back-wall region hits screen edge → abrupt cutoff.
+m_CameraPosArray[5].position = Vector3(0.0f, 0.06f, -1.20f);
+m_CameraPosArray[5].heading  = 3.14159f;
+m_CameraPosArray[5].pitch    = -0.02f;
+
+// 6. SSR Artifact: Off-Screen Missing — reflected object is outside the rendered frame.
+//    Camera tilts steeply down at Box A's top; area light (above) is off-screen → blank reflection.
+m_CameraPosArray[6].position = Vector3(-0.25f, 0.80f, -0.85f);
+m_CameraPosArray[6].heading  = 3.14159f;
+m_CameraPosArray[6].pitch    = -0.55f;
+
+// 7. SSR Artifact: Depth Discontinuity — sharp depth step at Box A's base.
+//    SSR ray crossing the box edge hits a discontinuous depth sample → ghosting / missing strip.
+m_CameraPosArray[7].position = Vector3(-0.55f, 0.08f, -0.45f);
+m_CameraPosArray[7].heading  = 3.14159f + 0.30f;
+m_CameraPosArray[7].pitch    = 0.0f;
+
 SetCameraToPredefinedPosition(1);
 }
 
@@ -1315,8 +1334,9 @@ void D3D12RaytracingMiniEngineSample::RaytraceDiffuse(
     hitShaderConstants.IsReflection = false;
     hitShaderConstants.UseShadowRays = (rayTracingMode == RTM_DIFFUSE_WITH_SHADOWRAYS) ||
                                         (rayTracingMode == RTM_REFLECTIONS);
+    static const UINT kReflDepthMap[] = { 0, 1, 2, 4 };
     hitShaderConstants.MaxRecursionDepth = (rayTracingMode == RTM_REFLECTIONS) ?
-                                            (UINT32)(int)g_MaxRecursionDepth : 0;
+                                            kReflDepthMap[(int)g_MaxRecursionDepth] : 0;
     hitShaderConstants.pointLightPos   = Sponza::m_PointLightPos;
     hitShaderConstants.pointLightColor = Sponza::m_PointLightColor;
     hitShaderConstants.debugView       = (UINT32)(int)g_DebugView;
