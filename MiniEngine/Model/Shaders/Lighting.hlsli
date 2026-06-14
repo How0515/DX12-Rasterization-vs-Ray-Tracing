@@ -94,10 +94,32 @@ float GetDirectionalShadow( float3 ShadowCoord, Texture2D<float> texShadow )
 static const uint kPCSSGridDim = 8;
 static const uint kPCSSSampleCount = kPCSSGridDim * kPCSSGridDim;
 
-float2 GetPCSSGridOffset(uint sampleIndex)
+float2 GetPCSSDiskOffset(uint sampleIndex)
 {
-    float2 gridPosition = float2(sampleIndex % kPCSSGridDim, sampleIndex / kPCSSGridDim);
-    return gridPosition * (2.0f / (kPCSSGridDim - 1.0f)) - 1.0f;
+    float2 gridPosition =
+        (float2(sampleIndex % kPCSSGridDim, sampleIndex / kPCSSGridDim) + 0.5f) / kPCSSGridDim;
+    float2 squarePosition = gridPosition * 2.0f - 1.0f;
+
+    if (squarePosition.x == 0.0f && squarePosition.y == 0.0f)
+        return 0.0f;
+
+    float radius;
+    float angle;
+    if (abs(squarePosition.x) > abs(squarePosition.y))
+    {
+        radius = squarePosition.x;
+        angle = 0.78539816339f * (squarePosition.y / squarePosition.x);
+    }
+    else
+    {
+        radius = squarePosition.y;
+        angle = 1.57079632679f - 0.78539816339f * (squarePosition.x / squarePosition.y);
+    }
+
+    float sine;
+    float cosine;
+    sincos(angle, sine, cosine);
+    return radius * float2(cosine, sine);
 }
 
 float LinearizeAreaShadowDepth(float depth)
@@ -121,23 +143,30 @@ float GetAreaLightPCSS(float4 shadowCoordH, Texture2D<float> texShadow)
     texShadow.GetDimensions(shadowWidth, shadowHeight);
     float2 shadowSize = float2(shadowWidth, shadowHeight);
     float receiverDistance = LinearizeAreaShadowDepth(shadowCoord.z);
+    float minFilterRadiusUV = max(ShadowTexelSize.x, 1.0f / max(shadowWidth, shadowHeight));
     float searchRadiusUV = min(
         AreaShadowParams.w,
         AreaShadowParams.z * saturate((receiverDistance - AreaShadowParams.x) / receiverDistance));
+    searchRadiusUV = max(searchRadiusUV, minFilterRadiusUV);
 
-    float blockerDepthSum = 0.0f;
+    float blockerDistanceSum = 0.0f;
     uint blockerCount = 0;
+    float minBlockerSeparation = max(0.002f, receiverDistance * 0.002f);
     [unroll]
     for (uint i = 0; i < kPCSSSampleCount; ++i)
     {
-        int2 sampleCoord = int2(shadowCoord.xy * shadowSize + GetPCSSGridOffset(i) * searchRadiusUV * shadowSize);
-        sampleCoord = clamp(sampleCoord, int2(0, 0), int2(shadowWidth - 1, shadowHeight - 1));
-        float sampleDepth = texShadow.Load(int3(sampleCoord, 0));
+        float2 sampleUV = shadowCoord.xy + GetPCSSDiskOffset(i) * searchRadiusUV;
+        if (any(sampleUV <= 0.0f) || any(sampleUV >= 1.0f))
+            continue;
 
-        // Reverse-Z: a larger stored depth is closer to the light than the receiver.
-        if (sampleDepth > shadowCoord.z + 0.0001f)
+        int2 sampleCoord = int2(sampleUV * shadowSize);
+        float sampleDepth = texShadow.Load(int3(sampleCoord, 0));
+        float sampleDistance = LinearizeAreaShadowDepth(sampleDepth);
+
+        // Ignore the receiver itself and average blockers in linear light-view distance.
+        if (sampleDepth > shadowCoord.z && sampleDistance < receiverDistance - minBlockerSeparation)
         {
-            blockerDepthSum += sampleDepth;
+            blockerDistanceSum += sampleDistance;
             ++blockerCount;
         }
     }
@@ -145,21 +174,20 @@ float GetAreaLightPCSS(float4 shadowCoordH, Texture2D<float> texShadow)
     if (blockerCount == 0)
         return 1.0f;
 
-    float blockerDistance = LinearizeAreaShadowDepth(blockerDepthSum / blockerCount);
+    float blockerDistance = blockerDistanceSum / blockerCount;
     float penumbraRatio = max(receiverDistance - blockerDistance, 0.0f) / blockerDistance;
-    float filterRadiusUV = clamp(
-        penumbraRatio * AreaShadowParams.z,
-        ShadowTexelSize.x,
-        AreaShadowParams.w);
+    // A single center shadow map cannot reliably expand beyond the region searched for blockers.
+    float maxFilterRadiusUV = min(searchRadiusUV, AreaShadowParams.w);
+    float filterRadiusUV = clamp(penumbraRatio * AreaShadowParams.z, minFilterRadiusUV, maxFilterRadiusUV);
 
     float visibility = 0.0f;
     [unroll]
     for (uint j = 0; j < kPCSSSampleCount; ++j)
     {
-        visibility += texShadow.SampleCmpLevelZero(
-            shadowSampler,
-            shadowCoord.xy + GetPCSSGridOffset(j) * filterRadiusUV,
-            shadowCoord.z);
+        float2 sampleUV = shadowCoord.xy + GetPCSSDiskOffset(j) * filterRadiusUV;
+        visibility += any(sampleUV <= 0.0f) || any(sampleUV >= 1.0f)
+            ? 1.0f
+            : texShadow.SampleCmpLevelZero(shadowSampler, sampleUV, shadowCoord.z);
     }
     return visibility / kPCSSSampleCount;
 }
