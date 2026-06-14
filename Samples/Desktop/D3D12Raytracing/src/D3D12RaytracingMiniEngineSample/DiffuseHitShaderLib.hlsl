@@ -16,6 +16,7 @@
 #include "RayTracingHlslCompat.h"
 #include "PBR.hlsli"
 #include "ProceduralMaterial.hlsli"
+#include "ImportanceSampleGGX.hlsli"
 
 cbuffer Material : register(b3)
 {
@@ -346,28 +347,43 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
                 visibility);
         }
 
-        // Recursive mirror reflection (Stage 9): perfect specular bounce via reflect().
-        // Stage 10 upgrade: replace reflect() with GGX-sampled direction for glossy.
         if (DebugView == 0 && MaxRecursionDepth > 0 && payload.RecursionDepth < MaxRecursionDepth && pm.metallic > 0.5f)
         {
-            float3 reflDir = reflect(WorldRayDirection(), normal);
+            float3 reflDir;
+            bool   doReflect;
+            if (roughness < kGlossyRoughnessThreshold)
+            {
+                reflDir   = reflect(WorldRayDirection(), normal);
+                doReflect = true;
+            }
+            else
+            {
+                uint   seed = MakeHaltonSeed(DispatchRaysIndex().xy, g_dynamic.frameIndex);
+                float2 Xi   = Halton2D(seed);
+                float3 H    = ImportanceSampleGGX(Xi, roughness, normal);
+                reflDir     = reflect(WorldRayDirection(), H);
+                doReflect   = (dot(reflDir, normal) > 0.0f);
+            }
 
-            RayPayload reflPayload;
-            reflPayload.SkipShading    = false;
-            reflPayload.RayHitT        = FLT_MAX;
-            reflPayload.Color          = float3(0, 0, 0);
-            reflPayload.RecursionDepth = payload.RecursionDepth + 1;
+            if (doReflect)
+            {
+                RayPayload reflPayload;
+                reflPayload.SkipShading    = false;
+                reflPayload.RayHitT        = FLT_MAX;
+                reflPayload.Color          = float3(0, 0, 0);
+                reflPayload.RecursionDepth = payload.RecursionDepth + 1;
 
-            RayDesc reflRay;
-            reflRay.Origin    = worldPos + normal * 1e-4f;
-            reflRay.TMin      = 0.0f;
-            reflRay.Direction = reflDir;
-            reflRay.TMax      = FLT_MAX;
+                RayDesc reflRay;
+                reflRay.Origin    = worldPos + normal * 1e-4f;
+                reflRay.TMin      = 0.0f;
+                reflRay.Direction = reflDir;
+                reflRay.TMax      = FLT_MAX;
 
-            TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, reflRay, reflPayload);
+                TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, reflRay, reflPayload);
 
-            float3 F = F_Schlick(saturate(dot(normal, V)), specularAlbedo);
-            outputColor += F * reflPayload.Color;
+                float3 F = F_Schlick(saturate(dot(normal, V)), specularAlbedo);
+                outputColor += F * reflPayload.Color;
+            }
         }
 
         if (DebugView == 1)      outputColor = float3(pm.ao, pm.ao, pm.ao);
@@ -508,24 +524,41 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
 
     if (DebugView == 0 && MaxRecursionDepth > 0 && payload.RecursionDepth < MaxRecursionDepth && metallic > 0.5f)
     {
-        float3 reflDir = reflect(WorldRayDirection(), normal);
+        float3 reflDir;
+        bool   doReflect;
+        if (roughness < kGlossyRoughnessThreshold)
+        {
+            reflDir   = reflect(WorldRayDirection(), normal);
+            doReflect = true;
+        }
+        else
+        {
+            uint   seed = MakeHaltonSeed(DispatchRaysIndex().xy, g_dynamic.frameIndex);
+            float2 Xi   = Halton2D(seed);
+            float3 H    = ImportanceSampleGGX(Xi, roughness, normal);
+            reflDir     = reflect(WorldRayDirection(), H);
+            doReflect   = (dot(reflDir, normal) > 0.0f);
+        }
 
-        RayPayload reflPayload;
-        reflPayload.SkipShading    = false;
-        reflPayload.RayHitT        = FLT_MAX;
-        reflPayload.Color          = float3(0, 0, 0);
-        reflPayload.RecursionDepth = payload.RecursionDepth + 1;
+        if (doReflect)
+        {
+            RayPayload reflPayload;
+            reflPayload.SkipShading    = false;
+            reflPayload.RayHitT        = FLT_MAX;
+            reflPayload.Color          = float3(0, 0, 0);
+            reflPayload.RecursionDepth = payload.RecursionDepth + 1;
 
-        RayDesc reflRay;
-        reflRay.Origin    = worldPosition + normal * 1e-4f;
-        reflRay.TMin      = 0.0f;
-        reflRay.Direction = reflDir;
-        reflRay.TMax      = FLT_MAX;
+            RayDesc reflRay;
+            reflRay.Origin    = worldPosition + normal * 1e-4f;
+            reflRay.TMin      = 0.0f;
+            reflRay.Direction = reflDir;
+            reflRay.TMax      = FLT_MAX;
 
-        TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, reflRay, reflPayload);
+            TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, reflRay, reflPayload);
 
-        float3 F = F_Schlick(saturate(dot(normal, V)), specularAlbedo);
-        outputColor += F * reflPayload.Color;
+            float3 F = F_Schlick(saturate(dot(normal, V)), specularAlbedo);
+            outputColor += F * reflPayload.Color;
+        }
     }
 
     // Debug view override
