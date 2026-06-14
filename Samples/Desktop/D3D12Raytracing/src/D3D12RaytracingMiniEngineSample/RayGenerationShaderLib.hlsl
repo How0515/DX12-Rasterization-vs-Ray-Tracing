@@ -24,8 +24,12 @@ void RayGen()
         direction,
         FLT_MAX };
     RayPayload payload;
-    payload.SkipShading = false;
-    payload.RayHitT = FLT_MAX;
-    TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0,0,1,0, rayDesc, payload);
+    payload.SkipShading    = false;
+    payload.RayHitT        = FLT_MAX;
+    payload.Color          = float3(0, 0, 0);
+    payload.RecursionDepth = 0;
+    TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, rayDesc, payload);
+
+    g_screenOutput[DispatchRaysIndex().xy] = float4(payload.Color, 1.0f);
 }
 

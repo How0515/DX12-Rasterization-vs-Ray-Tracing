@@ -278,6 +278,7 @@ enum RaytracingMode
     RTM_REFLECTIONS,
 };
 EnumVar rayTracingMode("Application/Raytracing/RayTraceMode", RTM_OFF, _countof(rayTracingModes), rayTracingModes);
+NumVar g_MaxRecursionDepth("Application/Raytracing/MaxRecursionDepth", 1, 0, 2);
 
 const char* debugViewModes[] = { "None", "AO", "Roughness", "Metallic", "Normal" };
 EnumVar g_DebugView("Application/Debug View", 0, _countof(debugViewModes), debugViewModes);
@@ -1082,9 +1083,10 @@ void D3D12RaytracingMiniEngineSample::SetCameraToPredefinedPosition(int cameraPo
 
 void D3D12RaytracingMiniEngineSample::RenderScene(void)
 {
-    const bool skipDiffusePass = 
+    const bool skipDiffusePass =
         rayTracingMode == RTM_DIFFUSE_WITH_SHADOWMAPS ||
         rayTracingMode == RTM_DIFFUSE_WITH_SHADOWRAYS ||
+        rayTracingMode == RTM_REFLECTIONS ||
         rayTracingMode == RTM_TRAVERSAL;
         
     // Raster mode uses the shared shadow buffer for the ceiling area-light PCSS approximation.
@@ -1309,7 +1311,10 @@ void D3D12RaytracingMiniEngineSample::RaytraceDiffuse(
     hitShaderConstants.ShadowTexelSize[0] = 1.0f / g_ShadowBuffer.GetWidth();
     hitShaderConstants.modelToShadow = Transpose(Sponza::m_SunShadow.GetShadowMatrix());
     hitShaderConstants.IsReflection = false;
-    hitShaderConstants.UseShadowRays = rayTracingMode == RTM_DIFFUSE_WITH_SHADOWRAYS;
+    hitShaderConstants.UseShadowRays = (rayTracingMode == RTM_DIFFUSE_WITH_SHADOWRAYS) ||
+                                        (rayTracingMode == RTM_REFLECTIONS);
+    hitShaderConstants.MaxRecursionDepth = (rayTracingMode == RTM_REFLECTIONS) ?
+                                            (UINT32)(int)g_MaxRecursionDepth : 0;
     hitShaderConstants.pointLightPos   = Sponza::m_PointLightPos;
     hitShaderConstants.pointLightColor = Sponza::m_PointLightColor;
     hitShaderConstants.debugView       = (UINT32)(int)g_DebugView;
@@ -1449,7 +1454,7 @@ void D3D12RaytracingMiniEngineSample::Raytrace(class GraphicsContext& gfxContext
         break;
 
     case RTM_REFLECTIONS:
-        RaytraceReflections(gfxContext, m_Camera, g_SceneColorBuffer, g_SceneDepthBuffer, g_SceneNormalBuffer);
+        RaytraceDiffuse(gfxContext, m_Camera, g_SceneColorBuffer);
         break;
     }
 

@@ -164,9 +164,12 @@ float3 ApplyLightCommon(
     return nDotL * lightColor * (diffuseColor + specularFactor * specularColor);
 }
 
-float TraceAreaLightSampleVisibility(float3 worldPos, float3 normal, float3 samplePos)
+float TraceAreaLightSampleVisibility(float3 worldPos, float3 normal, float3 samplePos, uint callerDepth)
 {
     if (!UseShadowRays)
+        return 1.0f;
+    // RTPSO MaxTraceRecursionDepth=3; a shadow ray at callerDepth>=2 would reach depth 4 and crash.
+    if (callerDepth >= 2)
         return 1.0f;
 
     float3 toLight = samplePos - worldPos;
@@ -180,7 +183,11 @@ float TraceAreaLightSampleVisibility(float3 worldPos, float3 normal, float3 samp
     shadowRay.Direction = toLight / distanceToLight;
     shadowRay.TMax = distanceToLight - kShadowRayEpsilon;
 
-    RayPayload shadowPayload = { true, FLT_MAX };
+    RayPayload shadowPayload;
+    shadowPayload.SkipShading    = true;
+    shadowPayload.RayHitT        = FLT_MAX;
+    shadowPayload.Color          = float3(0, 0, 0);
+    shadowPayload.RecursionDepth = 0;
     TraceRay(
         g_accel,
         RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,
@@ -210,7 +217,7 @@ float3 ApplyRectAreaLightApprox(
     {
         float2 sampleOffset = GetAreaLightSampleOffset(i, gridRotation);
         float3 samplePos = PointLightPos.xyz + float3(sampleOffset.x, 0.0f, sampleOffset.y);
-        float visibility = TraceAreaLightSampleVisibility(worldPos, normal, samplePos);
+        float visibility = TraceAreaLightSampleVisibility(worldPos, normal, samplePos, 0);
         float3 toLight = samplePos - worldPos;
         float distSq = dot(toLight, toLight);
         float invDist = rsqrt(distSq);
@@ -295,7 +302,7 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         if (materialID == 106)
         {
             ProcMat lm = GetProceduralMaterial(106);
-            g_screenOutput[DispatchRaysIndex().xy] = float4(lm.baseColor, 1.0f);
+            payload.Color = lm.baseColor;
             return;
         }
 
@@ -315,7 +322,7 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         {
             float2 sampleOffset = GetAreaLightSampleOffset(li, gridRotation);
             float3 samplePos    = PointLightPos.xyz + float3(sampleOffset.x, 0.0f, sampleOffset.y);
-            float  visibility   = TraceAreaLightSampleVisibility(worldPos, normal, samplePos);
+            float  visibility   = TraceAreaLightSampleVisibility(worldPos, normal, samplePos, payload.RecursionDepth);
             float3 L            = samplePos - worldPos;
             float  invDist      = rsqrt(dot(L, L));
             L *= invDist;
@@ -330,15 +337,36 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
                 visibility);
         }
 
+        // Recursive mirror reflection (Stage 9): perfect specular bounce via reflect().
+        // Stage 10 upgrade: replace reflect() with GGX-sampled direction for glossy.
+        if (DebugView == 0 && MaxRecursionDepth > 0 && payload.RecursionDepth < MaxRecursionDepth && pm.metallic > 0.5f)
+        {
+            float3 reflDir = reflect(WorldRayDirection(), normal);
+
+            RayPayload reflPayload;
+            reflPayload.SkipShading    = false;
+            reflPayload.RayHitT        = FLT_MAX;
+            reflPayload.Color          = float3(0, 0, 0);
+            reflPayload.RecursionDepth = payload.RecursionDepth + 1;
+
+            RayDesc reflRay;
+            reflRay.Origin    = worldPos + normal * 1e-4f;
+            reflRay.TMin      = 0.0f;
+            reflRay.Direction = reflDir;
+            reflRay.TMax      = FLT_MAX;
+
+            TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, reflRay, reflPayload);
+
+            float3 F = F_Schlick(saturate(dot(normal, V)), specularAlbedo);
+            outputColor += F * reflPayload.Color;
+        }
+
         if (DebugView == 1)      outputColor = float3(pm.ao, pm.ao, pm.ao);
         else if (DebugView == 2) outputColor = float3(roughness, roughness, roughness);
         else if (DebugView == 3) outputColor = float3(pm.metallic, pm.metallic, pm.metallic);
         else if (DebugView == 4) outputColor = normal * 0.5 + 0.5;
 
-        if (DebugView == 0 && IsReflection)
-            outputColor = g_screenOutput[DispatchRaysIndex().xy].rgb + outputColor;
-
-        g_screenOutput[DispatchRaysIndex().xy] = float4(outputColor, 1.0f);
+        payload.Color = outputColor;
         return;
     }
 
@@ -453,7 +481,7 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         {
             float2 sampleOffset = GetAreaLightSampleOffset(li, gridRotation);
             float3 samplePos    = PointLightPos.xyz + float3(sampleOffset.x, 0.0f, sampleOffset.y);
-            float  visibility   = TraceAreaLightSampleVisibility(worldPosition, normal, samplePos);
+            float  visibility   = TraceAreaLightSampleVisibility(worldPosition, normal, samplePos, payload.RecursionDepth);
             float3 L            = samplePos - worldPosition;
             float  invDist      = rsqrt(dot(L, L));
             L *= invDist;
@@ -469,18 +497,33 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         }
     }
 
+    if (DebugView == 0 && MaxRecursionDepth > 0 && payload.RecursionDepth < MaxRecursionDepth && metallic > 0.5f)
+    {
+        float3 reflDir = reflect(WorldRayDirection(), normal);
+
+        RayPayload reflPayload;
+        reflPayload.SkipShading    = false;
+        reflPayload.RayHitT        = FLT_MAX;
+        reflPayload.Color          = float3(0, 0, 0);
+        reflPayload.RecursionDepth = payload.RecursionDepth + 1;
+
+        RayDesc reflRay;
+        reflRay.Origin    = worldPosition + normal * 1e-4f;
+        reflRay.TMin      = 0.0f;
+        reflRay.Direction = reflDir;
+        reflRay.TMax      = FLT_MAX;
+
+        TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, reflRay, reflPayload);
+
+        float3 F = F_Schlick(saturate(dot(normal, V)), specularAlbedo);
+        outputColor += F * reflPayload.Color;
+    }
+
     // Debug view override
     if (DebugView == 1)      outputColor = float3(ao, ao, ao);
     else if (DebugView == 2) outputColor = float3(roughness, roughness, roughness);
     else if (DebugView == 3) outputColor = float3(metallic, metallic, metallic);
     else if (DebugView == 4) outputColor = normal * 0.5 + 0.5;
 
-    // TODO: Should be passed in via material info
-    if (DebugView == 0 && IsReflection)
-    {
-        float reflectivity = normals[DispatchRaysIndex().xy].w;
-        outputColor = g_screenOutput[DispatchRaysIndex().xy].rgb + reflectivity * outputColor;
-    }
-
-    g_screenOutput[DispatchRaysIndex().xy] = float4(outputColor, 1.0);
+    payload.Color = outputColor;
 }
