@@ -431,11 +431,13 @@ void InitializeViews(const ModelH3D& model)
             const TextureRef* textures = model.GetMaterialTextures(i);
 
             UINT slot;
-            g_pRaytracingDescriptorHeap->AllocateDescriptor(srvHandle, slot);       // Diffuse
+            g_pRaytracingDescriptorHeap->AllocateDescriptor(srvHandle, slot);       // t6: Diffuse
             Graphics::g_Device->CopyDescriptorsSimple(1, srvHandle, textures[0].GetSRV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-            g_pRaytracingDescriptorHeap->AllocateDescriptor(srvHandle, unused);     // Normal
+            g_pRaytracingDescriptorHeap->AllocateDescriptor(srvHandle, unused);     // t7: Normal
             Graphics::g_Device->CopyDescriptorsSimple(1, srvHandle, textures[2].GetSRV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-            
+            g_pRaytracingDescriptorHeap->AllocateDescriptor(srvHandle, unused);     // t8: ORM
+            Graphics::g_Device->CopyDescriptorsSimple(1, srvHandle, textures[1].GetSRV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
             g_GpuSceneMaterialSrvs[i] = g_pRaytracingDescriptorHeap->GetGpuHandle(slot);
         }
     }
@@ -560,7 +562,7 @@ void InitializeRaytracingStateObjects(const ModelH3D &model, UINT numMeshes,
 
     D3D12_DESCRIPTOR_RANGE1 localTextureDescriptorRange = {};
     localTextureDescriptorRange.BaseShaderRegister = 6;
-    localTextureDescriptorRange.NumDescriptors = 2;
+    localTextureDescriptorRange.NumDescriptors = 3;  // t6=Diffuse, t7=Normal, t8=ORM
     localTextureDescriptorRange.RegisterSpace = 0;
     localTextureDescriptorRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     localTextureDescriptorRange.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
