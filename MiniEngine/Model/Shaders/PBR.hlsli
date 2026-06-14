@@ -64,15 +64,18 @@ float3 EvaluatePBR(
     float3 lightColor,
     float  shadow)
 {
+    // Clamp roughness: GGX D denominator → 0 as roughness → 0, causing specular explosion.
+    float  roughnessClamped = clamp(roughness, 0.04, 1.0);
+
     float3 H    = normalize(V + L);
     float NdotL = saturate(dot(N, L));
     float NdotV = max(dot(N, V), 1e-5);
     float NdotH = saturate(dot(N, H));
     float VdotH = saturate(dot(V, H));
 
-    float  alpha   = roughness * roughness;
+    float  alpha   = roughnessClamped * roughnessClamped;
     float  D       = D_GGX(NdotH, alpha);
-    float  G       = G_Smith(NdotV, NdotL, roughness);
+    float  G       = G_Smith(NdotV, NdotL, roughnessClamped);
     float3 F       = F_Schlick(VdotH, F0);
 
     // Specular: Cook-Torrance
@@ -96,9 +99,11 @@ float3 EvaluatePBR(
 // ---------------------------------------------------------------------------
 float3 AmbientPBR(float3 diffuseColor, float3 F0, float ao, float3 ambientColor)
 {
+    // Guard: ao=0 (from missing/black ORM fallback texture) kills all ambient.
+    float  aoSafe          = max(ao, 0.01);
     float3 ambientDiffuse  = (1.0 - F0) * diffuseColor;
     float3 ambientSpecular = F0;
-    return (ambientDiffuse + ambientSpecular) * ao * ambientColor;
+    return (ambientDiffuse + ambientSpecular) * aoSafe * ambientColor;
 }
 
 #endif // PBR_HLSLI
