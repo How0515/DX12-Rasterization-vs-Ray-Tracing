@@ -13,6 +13,7 @@
 #include "Common.hlsli"
 #define SINGLE_SAMPLE
 #include "Lighting.hlsli"
+#include "PBR.hlsli"
 
 Texture2D<float3> texDiffuse		: register(t0);
 Texture2D<float3> texORM			: register(t1);	// R=Occlusion, G=Roughness, B=Metallic
@@ -51,46 +52,56 @@ MRT main(VSOutput vsOutput)
 
     float3 diffuseAlbedo = SAMPLE_TEX(texDiffuse);
 
-    float3 ormSample    = SAMPLE_TEX(texORM);
-    float  ao           = ormSample.r;
-    float  roughness    = ormSample.g;
-    float  metallic     = ormSample.b;
-    float  specularMask = 1.0 - roughness;
-    float  gloss        = lerp(2.0, 128.0, (1.0 - roughness) * (1.0 - roughness));
-    float3 specularAlbedo = lerp(float3(0.04, 0.04, 0.04), diffuseAlbedo, metallic);
+    float3 ormSample      = SAMPLE_TEX(texORM);
+    float  ao             = ormSample.r;
+    float  roughness      = ormSample.g;
+    float  metallic       = ormSample.b;
+    float3 specularAlbedo = lerp(float3(0.04, 0.04, 0.04), diffuseAlbedo, metallic); // F0
     float3 diffuseContrib = diffuseAlbedo * (1.0 - metallic);
 
     float3 colorSum = 0;
     {
         float ssao = texSSAO[pixelPos];
-        colorSum += ApplyAmbientLight( diffuseAlbedo, ssao * ao, AmbientColor );
+        colorSum += AmbientPBR(diffuseContrib, specularAlbedo, ssao * ao, AmbientColor);
     }
 
     float3 normal;
     {
-        normal = SAMPLE_TEX(texNormal) * 2.0 - 1.0;
-        AntiAliasSpecular(normal, gloss);
+        normal = normalize(SAMPLE_TEX(texNormal) * 2.0 - 1.0);
         float3x3 tbn = float3x3(normalize(vsOutput.tangent), normalize(vsOutput.bitangent), normalize(vsOutput.normal));
         normal = normalize(mul(normal, tbn));
     }
 
-    float3 viewDir = normalize(vsOutput.viewDir);
-    // Directional light is disabled; the ceiling area-light approximation is used instead.
+    // vsOutput.viewDir = worldPos - ViewerPos (camera→surface), so negate for PBR V convention.
+    float3 V = normalize(-vsOutput.viewDir);
 
-    colorSum += ApplyRectAreaLightApprox( diffuseContrib, specularAlbedo, specularMask, gloss, normal, viewDir,
-        vsOutput.worldPos, PointLightPos.xyz, PointLightColor.xyz, vsOutput.shadowCoord, texShadow );
+    // Area light: 4 representative point samples with PCSS shadow (same geometry as Blinn-Phong path).
+    float  visibility = GetAreaLightPCSS(vsOutput.shadowCoord, texShadow);
+    const float2 sampleOffsets[4] = {
+        float2(-0.18f, -0.12f), float2( 0.18f, -0.12f),
+        float2(-0.18f,  0.12f), float2( 0.18f,  0.12f)
+    };
+    [unroll]
+    for (uint i = 0; i < 4; ++i)
+    {
+        float3 samplePos  = PointLightPos.xyz + float3(sampleOffsets[i].x, 0.0f, sampleOffsets[i].y);
+        float3 L          = samplePos - vsOutput.worldPos;
+        float  invDist    = rsqrt(dot(L, L));
+        L *= invDist;
+
+        // Distance falloff: R^2/d^2 − d/R  (R^2 = 9, same as original ApplyPointLight)
+        float distFalloff = 9.0f * invDist * invDist;
+        distFalloff = max(0.0f, distFalloff - rsqrt(distFalloff));
+
+        colorSum += distFalloff * EvaluatePBR(
+            diffuseContrib, specularAlbedo, roughness,
+            normal, V, L,
+            PointLightColor.xyz * 0.25f,
+            visibility);
+    }
     colorSum += SAMPLE_TEX(texEmissive).rgb;
 
-	// ShadeLights(colorSum, pixelPos,
-	// 	diffuseAlbedo,
-	// 	specularAlbedo,
-	// 	specularMask,
-	// 	gloss,
-	// 	normal,
-	// 	viewDir,
-	// 	vsOutput.worldPos
-	// 	);
-
+    // Debug views
     if (DebugView == 1)      colorSum = float3(ao, ao, ao);
     else if (DebugView == 2) colorSum = float3(roughness, roughness, roughness);
     else if (DebugView == 3) colorSum = float3(metallic, metallic, metallic);
