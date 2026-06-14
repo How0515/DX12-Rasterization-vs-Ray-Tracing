@@ -79,8 +79,8 @@ namespace Sponza
     NumVar m_PCSSLightSize("Sponza/Lighting/PCSS Light Size", 0.025f, 0.001f, 0.2f, 0.001f);
     NumVar m_PCSSMaxRadius("Sponza/Lighting/PCSS Max Radius", 0.05f, 0.001f, 0.2f, 0.001f);
 
-    // ---- Procedural scene geometry (floor, walls, box, ceiling, light, mirror plate) -----
-    static const UINT kNumProcSurfaces = 8;
+    // ---- Procedural scene geometry (floor, walls, mirror box, ceiling, light) -----
+    static const UINT kNumProcSurfaces = 7;
     static const UINT kAreaLightMaterialID = 106;
 
     struct ProcSurface
@@ -257,10 +257,10 @@ void Sponza::Startup( Camera& Camera )
     const float modelThickness = (float)modelDimensions.GetZ();
     const float modelHalfHeight = (float)modelDimensions.GetY() * 0.5f;
 
-    // Cornell-box composition: from the camera, the helmet sits at the back-left.
+    // Cornell-box composition: helmet at front-center, metallic mirror box at back-right.
     m_ModelTransform = Matrix4(AffineTransform(
         Matrix3::MakeYRotation(XM_PI),
-        Vector3(0.38f, 0.0f, 0.30f)));
+        Vector3(0.10f, 0.0f, -0.30f)));
 
     // Initial Cornell-box view.  ModelViewer applies the matching preset after
     // creating its camera controller.
@@ -280,10 +280,10 @@ void Sponza::Startup( Camera& Camera )
         const float kRoomTop  =  1.45f;
         const float kLightHalfX = 0.28f, kLightHalfZ = 0.20f;
         const float kLightY = kAreaLightPanelY;
-        // From the camera, this shorter box sits at the front-right.
+        // Mirror box sits at back-right from camera view (RT reflection comparison object).
         const float kBoxXMin = -0.65f, kBoxXMax = -0.25f;
         const float kBoxYMin = kFloorY, kBoxYMax = 0.52f;
-        const float kBoxZMin = -0.58f, kBoxZMax = -0.18f;
+        const float kBoxZMin =  0.10f, kBoxZMax =  0.55f;
 
         // Surface diffuse colours — must match ProceduralMaterial.hlsli baseColor values.
         struct SurfCol { float r, g, b; } cols[kNumProcSurfaces] = {
@@ -291,12 +291,11 @@ void Sponza::Startup( Camera& Camera )
             {0.630f, 0.060f, 0.050f},   // red wall
             {0.140f, 0.450f, 0.090f},   // green wall
             {0.720f, 0.710f, 0.680f},   // back wall
-            {0.900f, 0.400f, 0.050f},   // box (orange)
+            {0.950f, 0.950f, 0.950f},   // mirror box (silver)
             {0.720f, 0.710f, 0.680f},   // ceiling
             {1.000f, 0.950f, 0.800f},   // area light panel
-            {0.950f, 0.950f, 0.950f},   // mirror plate
         };
-        const UINT matIDs[kNumProcSurfaces] = {100, 101, 102, 103, 104, 105, kAreaLightMaterialID, 107};
+        const UINT matIDs[kNumProcSurfaces] = {100, 101, 102, 103, 104, 105, kAreaLightMaterialID};
 
         // FillQuad: writes 4 vertices (pos+normal+tangent+bitangent) and 6 indices.
         // Indices are CCW to match MiniEngine's RasterizerDefault (FrontCounterClockwise=TRUE).
@@ -419,21 +418,6 @@ void Sponza::Startup( Camera& Camera )
           vcnt[6]=4; icnt[6]=6;
           m_procSurfaces[6].vb.Create(L"ProcAreaLight VB", 4, sizeof(SceneVertex), tmpV);
           m_procSurfaces[6].ib.Create(L"ProcAreaLight IB", 6, sizeof(uint16_t), tmpI); }
-
-        // 7 - Mirror plate for reflection comparison (matID 107).
-        // Positioned so the camera (z=-2.65, y=0.70) can see reflections at a grazing angle.
-        // Placed between helmet and box; x offset keeps it in camera FOV.
-        // 3mm Y lift prevents z-fighting with the floor quad.
-        { const float kPlateY    = kFloorY + 0.003f;
-          const float kPlateXMin = -0.10f, kPlateXMax =  0.35f;
-          const float kPlateZNear = -0.55f, kPlateZFar = -0.25f;
-          const float p0[3]={kPlateXMin,kPlateY,kPlateZNear}, p1[3]={kPlateXMax,kPlateY,kPlateZNear},
-                      p2[3]={kPlateXMax,kPlateY,kPlateZFar},   p3[3]={kPlateXMin,kPlateY,kPlateZFar};
-          const float n[3]={0,1,0}, t[3]={1,0,0}, bt[3]={0,0,-1};
-          FillQuad(tmpV, tmpI, 0, p0,p1,p2,p3, n,t,bt);
-          vcnt[7]=4; icnt[7]=6;
-          m_procSurfaces[7].vb.Create(L"ProcMirrorPlate VB", 4, sizeof(SceneVertex), tmpV);
-          m_procSurfaces[7].ib.Create(L"ProcMirrorPlate IB", 6, sizeof(uint16_t), tmpI); }
 
         // Finalise per-surface metadata and allocate SRV descriptors.
         UINT descSize = Renderer::s_TextureHeap.GetDescriptorSize();

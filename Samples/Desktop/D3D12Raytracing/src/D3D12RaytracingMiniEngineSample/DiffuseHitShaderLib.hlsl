@@ -260,7 +260,6 @@ float3 GetProceduralNormal(uint matID, uint primIdx)
     if (matID == 103) return float3( 0,  0, -1);  // back wall
     if (matID == 105) return float3( 0, -1,  0);  // ceiling
     if (matID == 106) return float3( 0, -1,  0);  // area light panel
-    if (matID == 107) return float3( 0,  1,  0);  // mirror plate (upward)
     if (matID == 104)
     {
         if (primIdx <  2) return float3( 0,  1,  0);  // top

@@ -5,14 +5,13 @@
 //
 // MaterialID convention:
 //   0  - 26 : FlightHelmet submeshes — ORM texture path
-//   100     : Floor          diffuse grey,  metallic=0, roughness=0.85
-//   101     : Red Wall       diffuse red,   metallic=0, roughness=0.92
-//   102     : Green Wall     diffuse green, metallic=0, roughness=0.92
-//   103     : Back Wall      diffuse grey,  metallic=0, roughness=0.90
-//   104     : Box            diffuse grey,  metallic=0, roughness=0.75  (matte paint)
-//   105     : Ceiling        diffuse grey,  metallic=0, roughness=0.90
+//   100     : Floor          diffuse grey,  metallic=0, roughness=0.80
+//   101     : Red Wall       diffuse red,   metallic=0, roughness=0.95
+//   102     : Green Wall     diffuse green, metallic=0, roughness=0.95
+//   103     : Back Wall      diffuse grey,  metallic=0, roughness=0.92
+//   104     : Mirror Box     silver,        metallic=1, roughness=0.02  (reflection comparison)
+//   105     : Ceiling        diffuse grey,  metallic=0, roughness=0.95
 //   106     : Area Light     emissive panel
-//   107     : Mirror Plate   gold tint,     metallic=1, roughness=0.05  (reflection test)
 
 #ifndef PROCEDURAL_MATERIAL_HLSLI
 #define PROCEDURAL_MATERIAL_HLSLI
@@ -35,10 +34,9 @@ ProcMat GetProceduralMaterial(uint matID)
     case 101: m.baseColor = float3(0.630, 0.060, 0.050); m.metallic = 0.0; m.roughness = 0.95; break; // red wall
     case 102: m.baseColor = float3(0.140, 0.450, 0.090); m.metallic = 0.0; m.roughness = 0.95; break; // green wall
     case 103: m.baseColor = float3(0.720, 0.710, 0.680); m.metallic = 0.0; m.roughness = 0.92; break; // back wall
-    case 104: m.baseColor = float3(0.900, 0.400, 0.050); m.metallic = 0.0; m.roughness = 0.55; break; // box (orange, semi-matte)
+    case 104: m.baseColor = float3(0.950, 0.950, 0.950); m.metallic = 1.0; m.roughness = 0.02; break; // mirror box
     case 105: m.baseColor = float3(0.720, 0.710, 0.680); m.metallic = 0.0; m.roughness = 0.95; break; // ceiling
     case 106: m.baseColor = float3(1.000, 0.950, 0.800); m.metallic = 0.0; m.roughness = 1.00; break; // area light
-    case 107: m.baseColor = float3(0.950, 0.950, 0.950); m.metallic = 1.0; m.roughness = 0.02; break; // mirror plate
     default:  m.baseColor = float3(0.500, 0.500, 0.500); m.metallic = 0.0; m.roughness = 0.90; break;
     }
     return m;
