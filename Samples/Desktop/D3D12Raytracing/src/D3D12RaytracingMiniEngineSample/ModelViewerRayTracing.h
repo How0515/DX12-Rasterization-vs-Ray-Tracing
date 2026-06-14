@@ -5,8 +5,10 @@
 #ifdef HLSL
 struct RayPayload
 {
-    bool SkipShading;
-    float RayHitT;
+    bool   SkipShading;
+    float  RayHitT;
+    float3 Color;           // accumulated radiance returned to caller
+    uint   RecursionDepth;  // 0=primary, 1=first reflection bounce, 2=second
 };
 
 #endif
@@ -39,7 +41,7 @@ cbuffer HitShaderConstants : register(b0)
     uint IsReflection;
     uint UseShadowRays;
     uint DebugView;
-    // implicit 4-byte pad → offset 144
+    uint MaxRecursionDepth;  // 0=off, 1=Depth1, 2=Depth2; fills former implicit pad (offset 140)
     float4 PointLightPos;    // xyz = world position, w = unused
     float4 PointLightColor;  // xyz = radiance, w = unused
 }

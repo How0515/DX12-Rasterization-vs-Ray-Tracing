@@ -69,7 +69,7 @@ __declspec(align(16)) struct HitShaderConstants
     UINT32 IsReflection;
     UINT32 UseShadowRays;
     UINT32 debugView;
-    // implicit 4-byte pad → offset 144
+    UINT32 MaxRecursionDepth;  // 0=off, 1=Depth1, 2=Depth2; fills former implicit pad (offset 140)
     Vector3 pointLightPos;
     Vector3 pointLightColor;
 };
@@ -101,7 +101,7 @@ enum RaytracingTypes
     NumTypes
 };
 
-const static UINT MaxRayRecursion = 2;
+const static UINT MaxRayRecursion = 3;  // primary(1) + reflection(2) + shadow-in-refl(3)
 
 const static UINT c_NumCameraPositions = 5;
 
@@ -602,7 +602,7 @@ void InitializeRaytracingStateObjects(const ModelH3D &model, UINT numMeshes,
     SetDxilLibrary(stateObjectDesc, g_pmissShaderLib, missExportName);
 
     auto shaderConfigStateObject = stateObjectDesc.CreateSubobject<CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT>();
-    shaderConfigStateObject->Config(8, 8);
+    shaderConfigStateObject->Config(24, 8);  // payload: bool(4)+float(4)+float3(12)+uint(4)=24
 
     LPCWSTR hitGroupExportName = L"HitGroup";
     auto hitGroupSubobject = stateObjectDesc.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
