@@ -78,21 +78,27 @@ float3 EvaluatePBR(
     // Specular: Cook-Torrance
     float3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 1e-3);
 
-    // Diffuse: Lambertian weighted by energy remaining after reflection
-    // diffuseColor already encodes (1-metallic), so kD = (1-F) is sufficient.
-    float3 diffuse = (1.0 - F) * diffuseColor * (1.0 / PI);
+    // Diffuse: Lambertian (no /PI — light intensities are tuned for unnormalized Blinn-Phong,
+    // so dividing by PI would make the scene ~3x darker without retuning all light values).
+    float3 diffuse = (1.0 - F) * diffuseColor;
 
     return (diffuse + specular) * NdotL * lightColor * shadow;
 }
 
 // ---------------------------------------------------------------------------
 // Ambient (IBL placeholder — single-color ambient with AO).
-// Uses F0-based kD so metals receive no diffuse ambient.
+//
+//  diffuse ambient : (1 - F0) * diffuseColor  — dielectric contribution
+//  specular ambient: F0                        — metal/specular contribution
+//
+// Without specular ambient, metallic surfaces are completely black in
+// unlit areas because diffuseColor = baseColor*(1-metallic) = 0.
 // ---------------------------------------------------------------------------
 float3 AmbientPBR(float3 diffuseColor, float3 F0, float ao, float3 ambientColor)
 {
-    float3 kD = 1.0 - F0;
-    return kD * diffuseColor * ao * ambientColor;
+    float3 ambientDiffuse  = (1.0 - F0) * diffuseColor;
+    float3 ambientSpecular = F0;
+    return (ambientDiffuse + ambientSpecular) * ao * ambientColor;
 }
 
 #endif // PBR_HLSLI
