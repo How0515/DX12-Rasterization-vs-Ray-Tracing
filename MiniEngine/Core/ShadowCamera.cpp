@@ -13,6 +13,7 @@
 
 #include "pch.h"
 #include "ShadowCamera.h"
+#include <cmath>
 
 using namespace Math;
 
@@ -45,4 +46,31 @@ void ShadowCamera::UpdateMatrix(
 
     // Transform from clip space to texture space
     m_ShadowMatrix = Matrix4( AffineTransform( Matrix3::MakeScale( 0.5f, -0.5f, 1.0f ), Vector3(0.5f, 0.5f, 0.0f) ) ) * m_ViewProjMatrix;
+}
+
+void ShadowCamera::UpdatePerspectiveMatrix(
+    Vector3 LightPosition, Vector3 LightDirection,
+    float VerticalFovRadians, float AspectHeightOverWidth,
+    float NearClip, float FarClip )
+{
+    SetLookDirection(LightDirection, Vector3(kZUnitVector));
+    SetPosition(LightPosition);
+
+    const float Y = 1.0f / std::tan(VerticalFovRadians * 0.5f);
+    const float X = Y * AspectHeightOverWidth;
+    const float Q1 = NearClip / (FarClip - NearClip);
+    const float Q2 = Q1 * FarClip;
+
+    SetProjMatrix(Matrix4(
+        Vector4(X, 0.0f, 0.0f, 0.0f),
+        Vector4(0.0f, Y, 0.0f, 0.0f),
+        Vector4(0.0f, 0.0f, Q1, -1.0f),
+        Vector4(0.0f, 0.0f, Q2, 0.0f)
+        ));
+
+    Update();
+
+    m_ShadowMatrix = Matrix4(
+        AffineTransform(Matrix3::MakeScale(0.5f, -0.5f, 1.0f), Vector3(0.5f, 0.5f, 0.0f))
+        ) * m_ViewProjMatrix;
 }

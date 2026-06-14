@@ -31,6 +31,15 @@ public:
         uint32_t BufferPrecision	// Bit depth of shadow buffer--usually 16 or 24
         );
 
+    void UpdatePerspectiveMatrix(
+        Math::Vector3 LightPosition,
+        Math::Vector3 LightDirection,
+        float VerticalFovRadians,
+        float AspectHeightOverWidth,
+        float NearClip,
+        float FarClip
+        );
+
     // Used to transform world space to texture space for shadow sampling
     const Math::Matrix4& GetShadowMatrix() const { return m_ShadowMatrix; }
 

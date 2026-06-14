@@ -31,6 +31,7 @@ cbuffer PSConstants : register(b0)
     // implicit 12-byte pad → offset 128
     float4 PointLightPos;    // xyz = world position, w = unused
     float4 PointLightColor;  // xyz = radiance, w = unused
+    float4 AreaShadowParams; // x = near, y = far, z = light size in UV, w = max PCSS radius in UV
 }
 
 StructuredBuffer<LightData> lightBuffer : register(t14);
@@ -88,6 +89,82 @@ float GetDirectionalShadow( float3 ShadowCoord, Texture2D<float> texShadow )
         ) / 10.0;
 #endif
     return result * result;
+}
+
+static const float2 kPCSSSamples[16] =
+{
+    float2(-0.94201624f, -0.39906216f), float2( 0.94558609f, -0.76890725f),
+    float2(-0.09418410f, -0.92938870f), float2( 0.34495938f,  0.29387760f),
+    float2(-0.91588581f,  0.45771432f), float2(-0.81544232f, -0.87912464f),
+    float2(-0.38277543f,  0.27676845f), float2( 0.97484398f,  0.75648379f),
+    float2( 0.44323325f, -0.97511554f), float2( 0.53742981f, -0.47373420f),
+    float2(-0.26496911f, -0.41893023f), float2( 0.79197514f,  0.19090188f),
+    float2(-0.24188840f,  0.99706507f), float2(-0.81409955f,  0.91437590f),
+    float2( 0.19984126f,  0.78641367f), float2( 0.14383161f, -0.14100790f)
+};
+
+float LinearizeAreaShadowDepth(float depth)
+{
+    float nearClip = AreaShadowParams.x;
+    float farClip = AreaShadowParams.y;
+    return nearClip * farClip / (nearClip + depth * (farClip - nearClip));
+}
+
+float GetAreaLightPCSS(float4 shadowCoordH, Texture2D<float> texShadow)
+{
+    if (shadowCoordH.w <= 0.0f)
+        return 1.0f;
+
+    float3 shadowCoord = shadowCoordH.xyz / shadowCoordH.w;
+    if (any(shadowCoord.xy <= 0.0f) || any(shadowCoord.xy >= 1.0f) ||
+        shadowCoord.z <= 0.0f || shadowCoord.z >= 1.0f)
+        return 1.0f;
+
+    uint shadowWidth, shadowHeight;
+    texShadow.GetDimensions(shadowWidth, shadowHeight);
+    float2 shadowSize = float2(shadowWidth, shadowHeight);
+    float receiverDistance = LinearizeAreaShadowDepth(shadowCoord.z);
+    float searchRadiusUV = min(
+        AreaShadowParams.w,
+        AreaShadowParams.z * saturate((receiverDistance - AreaShadowParams.x) / receiverDistance));
+
+    float blockerDepthSum = 0.0f;
+    uint blockerCount = 0;
+    [unroll]
+    for (uint i = 0; i < 16; ++i)
+    {
+        int2 sampleCoord = int2(shadowCoord.xy * shadowSize + kPCSSSamples[i] * searchRadiusUV * shadowSize);
+        sampleCoord = clamp(sampleCoord, int2(0, 0), int2(shadowWidth - 1, shadowHeight - 1));
+        float sampleDepth = texShadow.Load(int3(sampleCoord, 0));
+
+        // Reverse-Z: a larger stored depth is closer to the light than the receiver.
+        if (sampleDepth > shadowCoord.z + 0.0001f)
+        {
+            blockerDepthSum += sampleDepth;
+            ++blockerCount;
+        }
+    }
+
+    if (blockerCount == 0)
+        return 1.0f;
+
+    float blockerDistance = LinearizeAreaShadowDepth(blockerDepthSum / blockerCount);
+    float penumbraRatio = max(receiverDistance - blockerDistance, 0.0f) / blockerDistance;
+    float filterRadiusUV = clamp(
+        penumbraRatio * AreaShadowParams.z,
+        ShadowTexelSize.x,
+        AreaShadowParams.w);
+
+    float visibility = 0.0f;
+    [unroll]
+    for (uint j = 0; j < 16; ++j)
+    {
+        visibility += texShadow.SampleCmpLevelZero(
+            shadowSampler,
+            shadowCoord.xy + kPCSSSamples[j] * filterRadiusUV,
+            shadowCoord.z);
+    }
+    return visibility / 16.0f;
 }
 
 float GetShadowConeLight(uint lightIndex, float3 shadowCoord)
@@ -191,8 +268,12 @@ float3 ApplyRectAreaLightApprox(
     float3 viewDir,
     float3 worldPos,
     float3 lightCenter,
-    float3 lightColor)
+    float3 lightColor,
+    float4 shadowCoord,
+    Texture2D<float> shadowMap)
 {
+    float visibility = GetAreaLightPCSS(shadowCoord, shadowMap);
+
     const float2 sampleOffsets[4] =
     {
         float2(-0.18f, -0.12f),
@@ -210,7 +291,7 @@ float3 ApplyRectAreaLightApprox(
             diffuseColor, specularColor, specularMask, gloss, normal, viewDir,
             worldPos, samplePos, 9.0f, lightColor * 0.25f);
     }
-    return result;
+    return visibility * result;
 }
 
 float3 ApplyConeLight(

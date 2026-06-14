@@ -75,6 +75,8 @@ namespace Sponza
 
     NumVar m_PointLightHeight("Sponza/Lighting/Area Light Height", kAreaLightPanelY, 0.0f, 2.0f, 0.005f);
     NumVar m_PointLightIntensity("Sponza/Lighting/Area Light Intensity", 0.2f, 0.0f, 10.0f, 0.1f);
+    NumVar m_PCSSLightSize("Sponza/Lighting/PCSS Light Size", 0.025f, 0.001f, 0.2f, 0.001f);
+    NumVar m_PCSSMaxRadius("Sponza/Lighting/PCSS Max Radius", 0.05f, 0.001f, 0.2f, 0.001f);
 
     // ---- Procedural scene geometry (floor, walls, box, ceiling, light) -----
     static const UINT kNumProcSurfaces = 7;
@@ -631,6 +633,7 @@ void Sponza::RenderScene(
         // implicit 12-byte pad → offset 128
         Vector3  pointLightPos;
         Vector3  pointLightColor;
+        Vector4  areaShadowParams;
     } psConstants;
 
     psConstants.sunDirection = m_SunDirection;
@@ -646,6 +649,8 @@ void Sponza::RenderScene(
     psConstants.FrameIndexMod2    = FrameIndex;
     psConstants.pointLightPos     = m_PointLightPos;
     psConstants.pointLightColor   = m_PointLightColor;
+    psConstants.areaShadowParams  = Vector4(
+        0.02f, 2.5f, (float)m_PCSSLightSize, (float)m_PCSSMaxRadius);
 
     // Set the default state for command lists
     auto& pfnSetupGraphicsState = [&](void)
@@ -715,12 +720,14 @@ void Sponza::RenderScene(
             {
                 ScopedTimer _prof2(L"Render Shadow Map", gfxContext);
 
-                // Shadow camera must be on the anti-sun side of the scene.
-                // camera_Z_axis = m_SunDirection, so scene must be in +m_SunDirection from camera.
-                const float kShadowOffset = 6.0f;
-                Vector3 shadowCenter = Vector3(0.0f, 0.8f, 0.0f) - m_SunDirection * kShadowOffset;
-                m_SunShadow.UpdateMatrix(-m_SunDirection, shadowCenter, Vector3(ShadowDimX, ShadowDimY, ShadowDimZ),
-                    (uint32_t)g_ShadowBuffer.GetWidth(), (uint32_t)g_ShadowBuffer.GetHeight(), 16);
+                // Approximate the rectangular ceiling light with a center perspective shadow map.
+                m_SunShadow.UpdatePerspectiveMatrix(
+                    m_PointLightPos,
+                    Vector3(0.0f, -1.0f, 0.0f),
+                    XMConvertToRadians(130.0f),
+                    1.0f,
+                    0.02f,
+                    2.5f);
 
                 g_ShadowBuffer.BeginRendering(gfxContext);
                 gfxContext.SetPipelineState(m_ShadowPSO);

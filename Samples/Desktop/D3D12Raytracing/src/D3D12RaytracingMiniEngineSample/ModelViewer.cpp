@@ -1081,8 +1081,8 @@ void D3D12RaytracingMiniEngineSample::RenderScene(void)
         rayTracingMode == RTM_DIFFUSE_WITH_SHADOWRAYS ||
         rayTracingMode == RTM_TRAVERSAL;
         
-    // Directional lighting is disabled, so its orthographic shadow map is not needed.
-    const bool skipShadowMap = true;
+    // Raster mode uses the shared shadow buffer for the ceiling area-light PCSS approximation.
+    const bool skipShadowMap = rayTracingMode != RTM_OFF;
 
     GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Render");
 

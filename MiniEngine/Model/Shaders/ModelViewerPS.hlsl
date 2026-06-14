@@ -29,7 +29,7 @@ struct VSOutput
 	sample float3 worldPos : WorldPos;
 	sample float2 uv : TexCoord0;
 	sample float3 viewDir : TexCoord1;
-	sample float3 shadowCoord : TexCoord2;
+    sample float4 shadowCoord : TexCoord2;
 	sample float3 normal : Normal;
 	sample float3 tangent : Tangent;
 	sample float3 bitangent : Bitangent;
@@ -71,7 +71,7 @@ MRT main(VSOutput vsOutput)
     // Directional light is disabled; the ceiling area-light approximation is used instead.
 
     colorSum += ApplyRectAreaLightApprox( diffuseAlbedo, specularAlbedo, specularMask, gloss, normal, viewDir,
-        vsOutput.worldPos, PointLightPos.xyz, PointLightColor.xyz );
+        vsOutput.worldPos, PointLightPos.xyz, PointLightColor.xyz, vsOutput.shadowCoord, texShadow );
     colorSum += SAMPLE_TEX(texEmissive).rgb;
 
 	// ShadeLights(colorSum, pixelPos,

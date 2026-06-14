@@ -42,7 +42,7 @@ struct VSOutput
     float3 worldPos : WorldPos;
     float2 texCoord : TexCoord0;
     float3 viewDir : TexCoord1;
-    float3 shadowCoord : TexCoord2;
+    float4 shadowCoord : TexCoord2;
     float3 normal : Normal;
     float3 tangent : Tangent;
     float3 bitangent : Bitangent;
@@ -61,7 +61,7 @@ VSOutput main(VSInput vsInput, uint vertexID : SV_VertexID)
     vsOutput.worldPos = worldPos;
     vsOutput.texCoord = vsInput.texcoord0;
     vsOutput.viewDir = worldPos - ViewerPos;
-    vsOutput.shadowCoord = mul(modelToShadow, float4(vsInput.position, 1.0)).xyz;
+    vsOutput.shadowCoord = mul(modelToShadow, float4(vsInput.position, 1.0));
 
     float3x3 normalMatrix = (float3x3)modelToWorld;
     vsOutput.normal    = normalize(mul(normalMatrix, vsInput.normal));
