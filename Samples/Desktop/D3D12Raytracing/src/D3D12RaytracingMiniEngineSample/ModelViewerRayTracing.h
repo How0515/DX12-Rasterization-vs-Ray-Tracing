@@ -19,7 +19,7 @@ struct DynamicCB
 {
     float4x4 cameraToWorld;
     float3   worldCameraPosition;
-    uint     padding;
+    uint     frameIndex;   // monotonically increasing; used as Halton seed for GGX IS
     float2   resolution;
     float2   padding2;     // pad offset 88→96 to align worldToClip to 16 bytes
     float4x4 worldToClip;  // view-proj (transposed for HLSL row-major) — used by SSR

@@ -1153,6 +1153,11 @@ void D3D12RaytracingMiniEngineSample::RenderScene(void)
     const D3D12_VIEWPORT& viewport = m_MainViewport;
     const D3D12_RECT& scissor = m_MainScissor;
 
+    // Monotonically increasing counter — drives Halton seed for GGX importance sampling.
+    // TAA accumulates the per-frame GGX samples across time.
+    static uint32_t s_frameCount = 0;
+    g_dynamicCb.frameIndex = s_frameCount++;
+
     Sponza::m_DebugView = (uint32_t)(int)g_DebugView;
     Sponza::RenderScene(gfxContext, m_Camera, viewport, scissor, skipDiffusePass, skipShadowMap);
 
