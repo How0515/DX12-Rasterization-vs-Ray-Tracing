@@ -1008,12 +1008,10 @@ m_CameraPosArray[7].position = Vector3(-0.55f, 0.08f, -0.45f);
 m_CameraPosArray[7].heading  = 3.14159f + 0.30f;
 m_CameraPosArray[7].pitch    = 0.0f;
 
-// 8. Depth-2 demo — floor reflects Box B's front face; Box B reflects helmet at Depth 2.
-//    Depth 1: floor shows Box B (silver).  Depth 2: floor→Box B→helmet (coloured).
-//    Switch MaxRecursionDepth between 1 and 2 to see the difference.
-m_CameraPosArray[8].position = Vector3(0.45f, 0.25f, -2.20f);
+// 8. Top view - above the back-face-culled ceiling, framing the entire room.
+m_CameraPosArray[8].position = Vector3(0.0f, 3.00f, 0.0f);
 m_CameraPosArray[8].heading  = 3.14159f;
-m_CameraPosArray[8].pitch    = -0.16f;
+m_CameraPosArray[8].pitch    = -1.5707f;
 
 SetCameraToPredefinedPosition(1);
 }
@@ -1062,6 +1060,11 @@ void D3D12RaytracingMiniEngineSample::Update( float deltaT )
     {
         rayTracingMode = RTM_REFLECTIONS;
         g_MaxRecursionDepth = 4;
+    }
+    else if(GameInput::IsFirstPressed(GameInput::kKey_9))
+    {
+        m_CameraPosArrayCurrentPosition = 8;
+        SetCameraToPredefinedPosition(m_CameraPosArrayCurrentPosition);
     }
     
     static bool freezeCamera = false;
