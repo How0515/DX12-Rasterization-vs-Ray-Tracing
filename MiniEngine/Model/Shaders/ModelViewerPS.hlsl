@@ -15,7 +15,7 @@
 #include "Lighting.hlsli"
 
 Texture2D<float3> texDiffuse		: register(t0);
-Texture2D<float3> texSpecular		: register(t1);
+Texture2D<float3> texORM			: register(t1);	// R=Occlusion, G=Roughness, B=Metallic
 Texture2D<float4> texEmissive		: register(t2);
 Texture2D<float3> texNormal			: register(t3);
 //Texture2D<float4> texLightmap		: register(t4);
@@ -50,13 +50,22 @@ MRT main(VSOutput vsOutput)
 # define SAMPLE_TEX(texName) texName.Sample(defaultSampler, vsOutput.uv)
 
     float3 diffuseAlbedo = SAMPLE_TEX(texDiffuse);
+
+    float3 ormSample    = SAMPLE_TEX(texORM);
+    float  ao           = ormSample.r;
+    float  roughness    = ormSample.g;
+    float  metallic     = ormSample.b;
+    float  specularMask = 1.0 - roughness;
+    float  gloss        = lerp(2.0, 128.0, (1.0 - roughness) * (1.0 - roughness));
+    float3 specularAlbedo = lerp(float3(0.04, 0.04, 0.04), diffuseAlbedo, metallic);
+    float3 diffuseContrib = diffuseAlbedo * (1.0 - metallic);
+
     float3 colorSum = 0;
     {
-        float ao = texSSAO[pixelPos];
-        colorSum += ApplyAmbientLight( diffuseAlbedo, ao, AmbientColor );
+        float ssao = texSSAO[pixelPos];
+        colorSum += ApplyAmbientLight( diffuseAlbedo, ssao * ao, AmbientColor );
     }
 
-    float gloss = 128.0;
     float3 normal;
     {
         normal = SAMPLE_TEX(texNormal) * 2.0 - 1.0;
@@ -65,12 +74,10 @@ MRT main(VSOutput vsOutput)
         normal = normalize(mul(normal, tbn));
     }
 
-    float3 specularAlbedo = float3( 0.56, 0.56, 0.56 );
-    float specularMask = SAMPLE_TEX(texSpecular).g;
     float3 viewDir = normalize(vsOutput.viewDir);
     // Directional light is disabled; the ceiling area-light approximation is used instead.
 
-    colorSum += ApplyRectAreaLightApprox( diffuseAlbedo, specularAlbedo, specularMask, gloss, normal, viewDir,
+    colorSum += ApplyRectAreaLightApprox( diffuseContrib, specularAlbedo, specularMask, gloss, normal, viewDir,
         vsOutput.worldPos, PointLightPos.xyz, PointLightColor.xyz, vsOutput.shadowCoord, texShadow );
     colorSum += SAMPLE_TEX(texEmissive).rgb;
 
