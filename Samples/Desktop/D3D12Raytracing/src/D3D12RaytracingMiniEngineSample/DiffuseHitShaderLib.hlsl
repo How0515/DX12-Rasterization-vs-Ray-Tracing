@@ -29,7 +29,8 @@ SamplerState      g_s0 : register(s0);
 SamplerComparisonState shadowSampler : register(s1);
 
 Texture2D<float4> g_localTexture : register(t6);
-Texture2D<float4> g_localNormal : register(t7);
+Texture2D<float4> g_localNormal  : register(t7);
+Texture2D<float4> g_localORM     : register(t8);  // R=Occlusion, G=Roughness, B=Metallic
 
 Texture2D<float4>   normals  : register(t13);
 
@@ -407,23 +408,30 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
     //---------------------------------------------------------------------------------------------
 
     const float3 diffuseColor = g_localTexture.SampleGrad(g_s0, uv, ddxUV, ddyUV).rgb;
+
+    float3 ormSample     = g_localORM.SampleGrad(g_s0, uv, ddxUV, ddyUV).rgb;
+    float  ao            = ormSample.r;
+    float  roughness     = ormSample.g;
+    float  metallic      = ormSample.b;
+    float  specularMask  = 1.0 - roughness;
+    float  gloss         = lerp(2.0, 128.0, (1.0 - roughness) * (1.0 - roughness));
+    float3 specularAlbedo  = lerp(float3(0.04, 0.04, 0.04), diffuseColor, metallic);
+    float3 diffuseContrib  = diffuseColor * (1.0 - metallic);
+
     float3 normal;
-    float3 specularAlbedo = float3(0.56, 0.56, 0.56);
-    float specularMask = 0;     // TODO: read the texture
-    float gloss = 128.0;
     {
         normal = g_localNormal.SampleGrad(g_s0, uv, ddxUV, ddyUV).rgb * 2.0 - 1.0;
         AntiAliasSpecular(normal, gloss);
         float3x3 tbn = float3x3(vsTangent, vsBitangent, vsNormal);
         normal = normalize(mul(normal, tbn));
     }
-    
-    float3 outputColor = AmbientColor * diffuseColor * texSSAO[DispatchRaysIndex().xy];
+
+    float3 outputColor = AmbientColor * diffuseColor * texSSAO[DispatchRaysIndex().xy] * ao;
 
     const float3 viewDir = normalize(-WorldRayDirection());
 
     outputColor += ApplyRectAreaLightApprox(
-        diffuseColor, specularAlbedo, specularMask, gloss,
+        diffuseContrib, specularAlbedo, specularMask, gloss,
         normal, viewDir, worldPosition);
 
     // TODO: Should be passed in via material info
