@@ -1169,12 +1169,12 @@ void D3D12RaytracingMiniEngineSample::Update( float deltaT )
         freezeCamera = !freezeCamera;
     }
 
-    if (GameInput::IsFirstPressed(GameInput::kKey_left))
+    if (GameInput::IsFirstPressed(GameInput::kKey_up))
     {
         m_CameraPosArrayCurrentPosition = (m_CameraPosArrayCurrentPosition + c_NumCameraPositions - 1) % c_NumCameraPositions;
         SetCameraToPredefinedPosition(m_CameraPosArrayCurrentPosition);
     }
-    else if (GameInput::IsFirstPressed(GameInput::kKey_right))
+    else if (GameInput::IsFirstPressed(GameInput::kKey_down))
     {
         m_CameraPosArrayCurrentPosition = (m_CameraPosArrayCurrentPosition + 1) % c_NumCameraPositions;
         SetCameraToPredefinedPosition(m_CameraPosArrayCurrentPosition);
@@ -1618,7 +1618,7 @@ void D3D12RaytracingMiniEngineSample::RenderUI(class GraphicsContext& gfxContext
     text.SetColor(Color(0.75f, 0.75f, 0.75f));
     text.DrawString("1=Raster  2=Direct  3=SSR  4=RT  5=RT+ShadowRays  6/7/8=Reflections  9=GlossyIBL  0=GlossyRT");
     text.NewLine();
-    text.DrawString("G=GI-RT-1x  J=GI-RT-2x  H=GI-Raster  |  U=GI-cam  Y=Glossy-cam  Arrows=cycle  F=freeze-cam");
+    text.DrawString("G=GI-RT-1x  J=GI-RT-2x  H=GI-Raster  |  U=GI-cam  Y=Glossy-cam  Up/Down=cycle-cam  F=freeze-cam");
 
     text.End();
 }
