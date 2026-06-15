@@ -258,6 +258,20 @@ float3 BarycentricCoordinates(float3 pt, float3 v0, float3 v1, float3 v2)
     return float3(u, v, w);
 }
 
+// Cosine-weighted hemisphere sample in world space. Xi in [0,1)^2.
+// pdf = NdotL/pi; Lambertian BRDF = albedo/pi → estimator reduces to albedo * L_i.
+float3 CosineSampleHemisphere(float2 Xi, float3 N)
+{
+    float phi      = 6.28318530718f * Xi.x;
+    float sinTheta = sqrt(Xi.y);
+    float cosTheta = sqrt(max(0.0f, 1.0f - Xi.y));
+    float3 local   = float3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta);
+    float3 up      = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(1.0f, 0.0f, 0.0f);
+    float3 T       = normalize(cross(up, N));
+    float3 B       = cross(N, T);
+    return normalize(T * local.x + B * local.y + N * local.z);
+}
+
 // World-space outward normals for procedural surfaces.
 // Box (matID 104): each face = 2 triangles, ordered top/front/back/left/right/bottom.
 float3 GetProceduralNormal(uint matID, uint primIdx)
@@ -386,6 +400,30 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
                 float3 F = F_Schlick(saturate(dot(normal, V)), specularAlbedo);
                 outputColor += F * reflPayload.Color;
             }
+        }
+
+        // 1-bounce diffuse GI: trace cosine-weighted secondary ray on diffuse surfaces.
+        // Estimator: albedo/pi * L_i * NdotL / (NdotL/pi) = albedo * L_i.
+        if (GIScene && payload.RecursionDepth == 0 && pm.metallic < 0.5f)
+        {
+            uint   seed  = MakeHaltonSeed(DispatchRaysIndex().xy, g_dynamic.frameIndex);
+            float2 Xi    = Halton2D(seed);
+            float3 giDir = CosineSampleHemisphere(Xi, normal);
+
+            RayPayload giPayload;
+            giPayload.SkipShading    = false;
+            giPayload.RayHitT        = FLT_MAX;
+            giPayload.Color          = float3(0, 0, 0);
+            giPayload.RecursionDepth = 1;
+
+            RayDesc giRay;
+            giRay.Origin    = worldPos + normal * 1e-4f;
+            giRay.TMin      = 0.0f;
+            giRay.Direction = giDir;
+            giRay.TMax      = FLT_MAX;
+
+            TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, giRay, giPayload);
+            outputColor += pm.baseColor * giPayload.Color;
         }
 
         if (DebugView == 1)      outputColor = float3(pm.ao, pm.ao, pm.ao);
@@ -563,6 +601,29 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
             float3 F = F_Schlick(saturate(dot(normal, V)), specularAlbedo);
             outputColor += F * reflPayload.Color;
         }
+    }
+
+    // 1-bounce diffuse GI: trace cosine-weighted secondary ray on diffuse surfaces.
+    if (GIScene && payload.RecursionDepth == 0 && metallic < 0.5f)
+    {
+        uint   seed  = MakeHaltonSeed(DispatchRaysIndex().xy, g_dynamic.frameIndex);
+        float2 Xi    = Halton2D(seed);
+        float3 giDir = CosineSampleHemisphere(Xi, normal);
+
+        RayPayload giPayload;
+        giPayload.SkipShading    = false;
+        giPayload.RayHitT        = FLT_MAX;
+        giPayload.Color          = float3(0, 0, 0);
+        giPayload.RecursionDepth = 1;
+
+        RayDesc giRay;
+        giRay.Origin    = worldPosition + normal * 1e-4f;
+        giRay.TMin      = 0.0f;
+        giRay.Direction = giDir;
+        giRay.TMax      = FLT_MAX;
+
+        TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, giRay, giPayload);
+        outputColor += diffuseColor * giPayload.Color;
     }
 
     // Debug view override

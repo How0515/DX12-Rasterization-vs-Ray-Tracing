@@ -273,7 +273,8 @@ const char* rayTracingModes[] = {
     "RT Refl2",         // 6 → RTM_TRAVERSAL (debug)
     "RT Refl4",         // 7 → RTM_SHADOWS (debug/legacy)
     "Raster+IBL",       // 8 → RTM_RASTER_GLOSSY
-    "RT Glossy"};       // 9 → RTM_GLOSSY
+    "RT Glossy",        // 9 → RTM_GLOSSY
+    "RT GI"};           // 10 → RTM_GI_RT (1-bounce diffuse path tracing)
 enum RaytracingMode
 {
     RTM_RASTER,                  // 0: raster, no shadow
@@ -284,8 +285,9 @@ enum RaytracingMode
     RTM_REFLECTIONS,             // 5: RT reflections (depth controlled by g_MaxRecursionDepth)
     RTM_TRAVERSAL,               // 6: debug — barycentrics
     RTM_SHADOWS,                 // 7: legacy/unused
-    RTM_RASTER_GLOSSY,           // 8: raster + shadow + GGX prefiltered IBL (Commit 5-6)
-    RTM_GLOSSY,                  // 9: RT GGX IS reflections at depth 1 (Commit 2-3)
+    RTM_RASTER_GLOSSY,           // 8: raster + shadow + GGX prefiltered IBL
+    RTM_GLOSSY,                  // 9: RT GGX IS reflections at depth 1
+    RTM_GI_RT,                   // 10: RT 1-bounce diffuse GI (cosine-weighted path tracing)
 };
 EnumVar rayTracingMode("Application/Raytracing/RayTraceMode", RTM_OFF, _countof(rayTracingModes), rayTracingModes);
 const char* reflectionDepthLabels[] = { "0 - Off", "1", "2", "4" };
@@ -1118,7 +1120,8 @@ void D3D12RaytracingMiniEngineSample::Update( float deltaT )
     // --- GI modes ---
     else if (GameInput::IsFirstPressed(GameInput::kKey_g))
     {
-        Sponza::m_GIScene = 1;  // activate GI scene: Box A → diffuse white
+        rayTracingMode  = RTM_GI_RT;
+        Sponza::m_GIScene = 1;
         m_CameraPosArrayCurrentPosition = 11;
         SetCameraToPredefinedPosition(m_CameraPosArrayCurrentPosition);
     }
@@ -1205,7 +1208,8 @@ void D3D12RaytracingMiniEngineSample::RenderScene(void)
         rayTracingMode == RTM_DIFFUSE_WITH_SHADOWRAYS ||
         rayTracingMode == RTM_REFLECTIONS ||
         rayTracingMode == RTM_TRAVERSAL ||
-        rayTracingMode == RTM_GLOSSY;
+        rayTracingMode == RTM_GLOSSY ||
+        rayTracingMode == RTM_GI_RT;
 
     // Shadow map: raster modes (RTM_OFF, RTM_SSR, RTM_RASTER_GLOSSY) need it; all RT modes skip it.
     const bool skipShadowMap =
@@ -1440,7 +1444,8 @@ void D3D12RaytracingMiniEngineSample::RaytraceDiffuse(
     hitShaderConstants.IsReflection = false;
     hitShaderConstants.UseShadowRays = (rayTracingMode == RTM_DIFFUSE_WITH_SHADOWRAYS) ||
                                         (rayTracingMode == RTM_REFLECTIONS) ||
-                                        (rayTracingMode == RTM_GLOSSY);
+                                        (rayTracingMode == RTM_GLOSSY) ||
+                                        (rayTracingMode == RTM_GI_RT);
     static const UINT kReflDepthMap[] = { 0, 1, 2, 4 };
     hitShaderConstants.MaxRecursionDepth =
         (rayTracingMode == RTM_REFLECTIONS || rayTracingMode == RTM_GLOSSY) ?
@@ -1573,6 +1578,7 @@ void D3D12RaytracingMiniEngineSample::Raytrace(class GraphicsContext& gfxContext
     case RTM_DIFFUSE_WITH_SHADOWRAYS:
     case RTM_REFLECTIONS:
     case RTM_GLOSSY:
+    case RTM_GI_RT:
         RaytraceDiffuse(gfxContext, m_Camera, g_SceneColorBuffer);
         break;
 
