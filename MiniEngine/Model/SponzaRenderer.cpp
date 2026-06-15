@@ -35,6 +35,7 @@
 #include "CompiledShaders/DepthViewerPS.h"
 #include "CompiledShaders/ModelViewerVS.h"
 #include "CompiledShaders/ModelViewerPS.h"
+#include "CompiledShaders/GGXPrefilterCS.h"
 
 using namespace Math;
 using namespace Graphics;
@@ -62,6 +63,17 @@ namespace Sponza
     static D3D12_CPU_DESCRIPTOR_HANDLE g_CubeFaceRTV[6];
     static D3D12_CPU_DESCRIPTOR_HANDLE g_EnvCubeSRV;
     static bool                g_EnvCubeReady = false;
+
+    // GGX prefiltered environment map (kEnvCubeMips mip levels: roughness 0 → 1)
+    static const UINT          kEnvCubeMips = 7;
+    static ComPtr<ID3D12Resource> g_PrefilteredEnvResource;
+    static D3D12_RESOURCE_STATES  g_PrefilteredEnvState = D3D12_RESOURCE_STATE_COMMON;
+    static D3D12_CPU_DESCRIPTOR_HANDLE g_PrefilteredEnvUAV[kEnvCubeMips];
+    static D3D12_CPU_DESCRIPTOR_HANDLE g_PrefilteredEnvSRV;
+    static bool                g_PrefilteredEnvReady = false;
+
+    static RootSignature s_PrefilterRS;
+    static ComputePSO    s_PrefilterPSO(L"GGX Prefilter PSO");
 
     ModelH3D m_Model;
     Matrix4 m_ModelTransform(kIdentity);
@@ -284,6 +296,71 @@ void Sponza::Startup( Camera& Camera )
         srvDesc.TextureCube.MipLevels           = 1;
         srvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
         Graphics::g_Device->CreateShaderResourceView(cubeRes, &srvDesc, g_EnvCubeSRV);
+    }
+
+    // GGX prefilter root signature: slot0=4 root constants, slot1=SRV t0, slot2=UAV u0, s0=linear clamp
+    {
+        D3D12_SAMPLER_DESC sd = {};
+        sd.Filter         = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        sd.AddressU = sd.AddressV = sd.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        sd.MaxAnisotropy  = 1;
+        sd.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+        sd.MaxLOD         = D3D12_FLOAT32_MAX;
+
+        s_PrefilterRS.Reset(3, 1);
+        s_PrefilterRS[0].InitAsConstants(0, 4);
+        s_PrefilterRS[1].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 1);
+        s_PrefilterRS[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 1);
+        s_PrefilterRS.InitStaticSampler(0, sd);
+        s_PrefilterRS.Finalize(L"GGXPrefilterRS");
+    }
+    s_PrefilterPSO.SetRootSignature(s_PrefilterRS);
+    s_PrefilterPSO.SetComputeShader(g_pGGXPrefilterCS, sizeof(g_pGGXPrefilterCS));
+    s_PrefilterPSO.Finalize();
+
+    // Prefiltered environment map: 128×128×6, kEnvCubeMips levels, R16G16B16A16_FLOAT + UAV
+    {
+        D3D12_RESOURCE_DESC pfDesc = {};
+        pfDesc.Dimension          = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        pfDesc.Width              = kEnvCubeSize;
+        pfDesc.Height             = kEnvCubeSize;
+        pfDesc.DepthOrArraySize   = 6;
+        pfDesc.MipLevels          = (UINT16)kEnvCubeMips;
+        pfDesc.Format             = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        pfDesc.SampleDesc.Count   = 1;
+        pfDesc.Layout             = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        pfDesc.Flags              = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+        D3D12_HEAP_PROPERTIES defHeap = {};
+        defHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+        g_Device->CreateCommittedResource(&defHeap, D3D12_HEAP_FLAG_NONE, &pfDesc,
+            g_PrefilteredEnvState, nullptr, IID_PPV_ARGS(&g_PrefilteredEnvResource));
+
+        // Per-mip UAV descriptors (all 6 faces, one mip level per UAV)
+        for (UINT mip = 0; mip < kEnvCubeMips; ++mip)
+        {
+            g_PrefilteredEnvUAV[mip] = AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+            uavDesc.Format                         = DXGI_FORMAT_R16G16B16A16_FLOAT;
+            uavDesc.ViewDimension                  = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+            uavDesc.Texture2DArray.MipSlice        = mip;
+            uavDesc.Texture2DArray.FirstArraySlice = 0;
+            uavDesc.Texture2DArray.ArraySize       = 6;
+            g_Device->CreateUnorderedAccessView(g_PrefilteredEnvResource.Get(),
+                nullptr, &uavDesc, g_PrefilteredEnvUAV[mip]);
+        }
+
+        // TextureCube SRV covering all mip levels for IBL sampling
+        g_PrefilteredEnvSRV = AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        D3D12_SHADER_RESOURCE_VIEW_DESC pfSRV = {};
+        pfSRV.Format                          = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        pfSRV.ViewDimension                   = D3D12_SRV_DIMENSION_TEXTURECUBE;
+        pfSRV.Shader4ComponentMapping         = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        pfSRV.TextureCube.MostDetailedMip     = 0;
+        pfSRV.TextureCube.MipLevels           = kEnvCubeMips;
+        pfSRV.TextureCube.ResourceMinLODClamp = 0.0f;
+        g_Device->CreateShaderResourceView(g_PrefilteredEnvResource.Get(), &pfSRV, g_PrefilteredEnvSRV);
     }
 
     ASSERT(m_Model.Load(L"FlightHelmet/FlightHelmet.h3d"), "Failed to load model");
@@ -537,8 +614,10 @@ const ModelH3D& Sponza::GetModel()
     return Sponza::m_Model;
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE Sponza::GetEnvCubeSRV()  { return g_EnvCubeSRV; }
-bool                        Sponza::IsEnvCubeReady()  { return g_EnvCubeReady; }
+D3D12_CPU_DESCRIPTOR_HANDLE Sponza::GetEnvCubeSRV()        { return g_EnvCubeSRV; }
+bool                        Sponza::IsEnvCubeReady()        { return g_EnvCubeReady; }
+D3D12_CPU_DESCRIPTOR_HANDLE Sponza::GetPrefilteredEnvSRV()  { return g_PrefilteredEnvSRV; }
+bool                        Sponza::IsPrefilteredEnvReady()  { return g_PrefilteredEnvReady; }
 
 void Sponza::Cleanup( void )
 {
@@ -880,6 +959,64 @@ void Sponza::RenderScene(
 
         gfxContext.TransitionResource(g_EnvCubeBuffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, true);
         g_EnvCubeReady = true;
+
+        // GGX prefilter CS: dispatch immediately after capture in the same command list
+        {
+            ScopedTimer _pfProf(L"GGX Prefilter", gfxContext);
+            ComputeContext& cmpCtx = gfxContext.GetComputeContext();
+
+            // Transition env cube from PSR to NON_PIXEL_SHADER_RESOURCE for compute read
+            cmpCtx.TransitionResource(g_EnvCubeBuffer,
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, true);
+
+            // Transition prefiltered env from COMMON to UAV
+            {
+                D3D12_RESOURCE_BARRIER toUAV = CD3DX12_RESOURCE_BARRIER::Transition(
+                    g_PrefilteredEnvResource.Get(), g_PrefilteredEnvState,
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                cmpCtx.GetCommandList()->ResourceBarrier(1, &toUAV);
+                g_PrefilteredEnvState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            }
+
+            cmpCtx.SetRootSignature(s_PrefilterRS);
+            cmpCtx.SetPipelineState(s_PrefilterPSO);
+            cmpCtx.SetDynamicDescriptor(1, 0, g_EnvCubeSRV);
+
+            for (UINT mip = 0; mip < kEnvCubeMips; ++mip)
+            {
+                UINT mipSize = kEnvCubeSize >> mip;
+                if (mipSize < 1) mipSize = 1;
+
+                cmpCtx.SetDynamicDescriptor(2, 0, g_PrefilteredEnvUAV[mip]);
+
+                struct { uint32_t mip, numMips, numSamples, size; } cb =
+                    { mip, kEnvCubeMips, 256u, mipSize };
+                cmpCtx.SetConstantArray(0, 4, &cb);
+
+                UINT groups = (mipSize + 7u) / 8u;
+                cmpCtx.Dispatch(groups, groups, 6);
+
+                D3D12_RESOURCE_BARRIER uavBarrier =
+                    CD3DX12_RESOURCE_BARRIER::UAV(g_PrefilteredEnvResource.Get());
+                cmpCtx.GetCommandList()->ResourceBarrier(1, &uavBarrier);
+            }
+
+            // Transition prefiltered env to PSR for later IBL sampling
+            {
+                D3D12_RESOURCE_BARRIER toSRV = CD3DX12_RESOURCE_BARRIER::Transition(
+                    g_PrefilteredEnvResource.Get(),
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                cmpCtx.GetCommandList()->ResourceBarrier(1, &toSRV);
+                g_PrefilteredEnvState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+            }
+
+            // Restore env cube to PSR
+            cmpCtx.TransitionResource(g_EnvCubeBuffer,
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, true);
+
+            g_PrefilteredEnvReady = true;
+        }
 
         // Restore state for the main color pass that follows
         pfnSetupGraphicsState();

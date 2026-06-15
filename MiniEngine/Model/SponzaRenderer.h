@@ -44,9 +44,13 @@ namespace Sponza
     const ModelH3D& GetModel();
 
     // Environment cubemap: 128×128×6 TextureCube captured on the first RenderScene call.
-    // Used by raster glossy IBL (Commits 5–6).
     D3D12_CPU_DESCRIPTOR_HANDLE GetEnvCubeSRV();
     bool IsEnvCubeReady();
+
+    // GGX prefiltered environment map: 128×128×6, 7 mip levels (roughness 0→1).
+    // Computed immediately after cubemap capture; ready for raster IBL from the second frame onward.
+    D3D12_CPU_DESCRIPTOR_HANDLE GetPrefilteredEnvSRV();
+    bool IsPrefilteredEnvReady();
 
     extern Math::Vector3 m_SunDirection;
     extern Math::Matrix4 m_ModelTransform;
