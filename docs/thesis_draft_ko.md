@@ -1,4 +1,4 @@
-# 논문 초안 v0.1
+﻿# 논문 초안 v0.1
 
 ## 제목 후보
 
@@ -514,32 +514,69 @@ SSR은 현재 화면 buffer에 존재하는 정보만 사용할 수 있다. 본 
 2. **Off-screen missing:** 반사되어야 하는 물체가 현재 카메라 화면 밖에 있어 결과에 나타나지 않는다.
 3. **Depth discontinuity:** ray march가 박스 모서리와 같은 급격한 depth 변화 구간을 통과하며 잘못된 교차 또는 누락을 생성한다.
 
+각 artifact의 데이터 수준 원인은 다음과 같다. Screen-edge cutoff는 ray march가 UV 범위를 벗어나는 순간 반사 color 조회가 실패하고 fallback(검정 또는 배경색)으로 대체되기 때문이다. Off-screen missing은 반사되어야 할 물체가 현재 camera frustum 밖에 있어 depth/color buffer 자체에 해당 정보가 존재하지 않는다. Depth discontinuity는 ray march가 depth가 급변하는 박스 모서리 근처에서 실제 교차 표면을 건너뛰거나 잘못된 배경 depth에 조기 히트하는 것으로, step size와 두께 허용치를 조절해도 모서리 근방에서의 오판은 남는다.
+
 이 현상들은 tuning만으로 완전히 해결하기 어렵다. SSR이 사용하는 현재 화면의 depth/color 정보에 필요한 장면이 존재하지 않기 때문이다.
 
 ### 4.6.3 Reflection Ray 구현
 
-RT 경로는 closest-hit 위치에서 `reflect` 함수로 반사 방향을 계산하고 secondary ray를 발사한다. Reflection ray는 TLAS 전체를 질의하므로 화면 밖 물체와 가려진 기하를 찾을 수 있다.
+RT 경로는 closest-hit 위치에서 HLSL `reflect(incident, normal)` 함수로 반사 방향을 계산하고, 해당 방향으로 secondary ray를 발사한다. Reflection ray는 TLAS 전체를 질의하므로 화면 밖 물체와 가려진 기하를 찾을 수 있다.
 
-재귀 깊이는 1, 2, 4 단계로 제어한다. 두 개의 거울 박스를 배치하여 카메라가 Box B를 보고, B 내부에 Box A가 반사되며, A 내부에 helmet이 반사되는 경로를 구성하였다. 이 장면은 reflection depth가 단순 성능 파라미터가 아니라 표현 가능한 광로의 길이를 결정함을 보여준다.
+자기 교차를 방지하기 위해 shadow ray와 동일하게 작은 world-space epsilon을 TMin에 적용하였다. Epsilon이 지나치게 크면 발사 표면 바로 앞의 실제 반사 물체를 건너뛰는 문제가 발생하므로, 반사 origin offset과 TMin을 함께 조정하였다.
+
+재귀 구조는 payload에 현재 깊이를 전달하고, 최대 깊이에 도달하면 추가 TraceRay를 호출하지 않고 환경 기여값을 반환하도록 구성하였다. RTPSO의 `MaxTraceRecursionDepth`는 지원할 최대 깊이보다 1 이상 크게 설정해야 하며, 이 값이 작으면 런타임 오류나 블랙 결과가 발생한다. 본 실험에서는 최대 Depth 5를 지원하기 위해 `MaxTraceRecursionDepth=6`으로 설정하였다.
+
+Mirror box 배치는 좌측 박스(Left Mirror Box)의 우측 면이 우측 박스(Right Mirror Box)를 향하고, 우측 박스의 좌측 면이 헬멧 방향을 향하도록 구성하였다. 이에 따라 `Camera → Floor → Left Box → Right Box → Helmet` 반사 체인이 구성되며, 재귀 깊이가 늘어날수록 체인의 더 깊은 단계가 화면에 나타난다. 이 장면은 reflection depth가 단순 성능 파라미터가 아니라 표현 가능한 광로의 길이를 결정함을 보여준다.
 
 ### 4.6.4 발생 문제
 
-다중 반사 구현에서는 다음 문제가 발생하였다.
+다중 반사 구현에서 발생한 문제와 조치는 다음과 같다.
 
-- Box의 raster geometry와 RT procedural normal 불일치
-- 거울 면 방향과 reflection path 배치 문제
-- recursion depth와 RTPSO 최대 깊이 불일치
-- 반사 ray origin epsilon에 의한 자기 교차
-- metallic 재질의 ambient 및 reflection contribution 처리
-- primary ray 화면과 reflection mode 화면의 혼동
+| 발생 조건 | 관찰 현상 | 파이프라인 원인 | 조치 |
+|---|---|---|---|
+| Raster geometry와 RT procedural normal 불일치 | 박스 면 경계에서 반사 결과가 Raster와 RT 사이에 어긋남 | Raster 삼각형 법선과 RT procedural 법선이 다른 방향을 사용 | RT procedural normal을 Raster geometry 기준에 맞춰 통일 |
+| 거울 면 방향 설정 오류 | 반사 경로가 예상 대상을 향하지 않음 | 박스 면의 법선 방향이 반사 대상을 가리키지 않음 | 박스 위치와 각 면의 법선 방향을 재배치 |
+| `MaxTraceRecursionDepth` 부족 | 깊은 재귀 설정 시 블랙 출력 또는 런타임 오류 | RTPSO 재귀 한도 초과 | `MaxTraceRecursionDepth`를 사용할 최대 Depth보다 1 이상 크게 설정 |
+| Ray origin epsilon 과소 | 발사 표면과 재교차하는 self-intersection artifact | reflection ray가 출발한 표면과 즉시 교차 | TMin epsilon을 shadow ray와 동일 수준으로 조정 |
+| Ambient와 reflection contribution 혼용 | Metallic 표면에 ambient가 포함되어 순수 반사 비교 불가 | ambient specular baseline이 reflection color와 합산됨 | Reflection 모드에서 ambient 기여를 통제하여 분리 관찰 |
+| Primary ray 화면과 reflection mode 화면 혼동 | 모드 전환 시 의도하지 않은 결과 출력 | UI 없이 두 모드를 구분하기 어려움 | 화면 overlay에 현재 Reflection Depth 및 모드 표시 추가 |
 
 ### 4.6.5 비교 결과 해석
 
-SSR의 artifact는 screen-space 정보가 불완전하기 때문에 발생한다. Reflection ray는 월드 공간 장면을 직접 질의하므로 이 구조적 누락을 해결한다. 그러나 RT는 재귀 깊이에 따라 비용이 증가하며, 완전한 mirror가 아닌 rough surface에서는 하나의 deterministic ray만으로 충분하지 않다.
+SSR artifact 실험에서 관찰한 단계별 현상은 다음과 같다.
+
+| 실험 조건 | 관찰 현상 | 파이프라인 원인 | 비고 |
+|---|---|---|---|
+| SSR: 반사 대상이 화면 밖 | 반사가 갑자기 사라지거나 검정으로 대체됨 | color/depth buffer에 해당 물체 정보 없음 | 카메라를 이동해도 SSR로 복원 불가 |
+| SSR: 반사 ray가 화면 경계 도달 | 경계 방향으로 갈수록 반사가 점차 끊김 | UV 범위 이탈 시 buffer 조회 실패 | edge fade 처리로 완화 가능하나 구조적 누락은 유지 |
+| SSR: 박스 모서리 근처 | 잘못된 교차 또는 조기 히트로 반사가 왜곡됨 | ray march가 depth discontinuity를 가로질러 오판 | step size 감소로 부분 완화, 근본 해결 불가 |
+| Reflection Ray Depth 2 | 벽과 그림자가 주로 반사됨, 헬멧 정보 없음 | 1회 반사만 가능한 광로 길이 | 반사 체인의 첫 단계만 열림 |
+| Reflection Ray Depth 3 | 좌측 박스 우측면에 우측 박스가 보이기 시작 | 2회 반사 광로 열림 | 바닥-박스 간 재귀 반사 더 명확해짐 |
+| Reflection Ray Depth 5 | 좌측 박스 우측면에 헬멧 반사 등장, 바닥에 전체 체인 완성 | 4회 반사로 Camera→Floor→Left Box→Right Box→Helmet 경로 완성 | Depth 5 이상은 헬멧이 순수 거울이 아니므로 추가 변화 없이 수렴 |
+
+SSR의 artifact는 screen-space 정보가 구조적으로 불완전하기 때문에 발생한다. 화면에 존재하지 않는 정보는 step size, 반복 횟수, edge fade 등을 조정해도 복원할 수 없다. Reflection ray는 월드 공간 장면을 직접 질의하여 이 구조적 누락을 해결하며, 재귀 깊이를 통해 표현 가능한 반사 체인의 길이를 제어한다.
+
+그러나 RT에서도 표현 가능성은 재귀 깊이로 제한되며, 깊이가 늘어날수록 ray 발사와 hit shading 비용이 증가한다. 또한 완전한 거울 재질이 아닌 rough surface에서는 하나의 deterministic ray만으로 충분하지 않아 Glossy Reflection 단계(Phase 6)가 필요하다. 4.6.7의 Depth별 관찰 결과에 따르면 본 실험 장면에서는 Depth 5 부근에서 반사 정보가 수렴하며, 그 이상의 재귀 비용은 시각적 이득 없이 연산만 늘린다.
 
 ### 4.6.6 결과 작성용 문장
 
-> SSR에서 관찰된 screen-edge cutoff와 off-screen missing은 ray marching 정밀도보다 입력 정보의 범위에 의해 발생하였다. Reflection ray는 TLAS를 통해 화면 밖 기하를 탐색하여 해당 누락을 해결하였으며, 재귀 깊이를 증가시켜 mirror-in-mirror 경로를 표현할 수 있었다. 그러나 재귀 깊이 증가에 따른 ray 및 shading 호출 비용과 normal 정합성 관리가 필요하였다.
+> SSR에서 관찰된 screen-edge cutoff, off-screen missing, depth discontinuity artifact는 ray marching 정밀도보다 color/depth buffer에 필요한 장면 정보 자체가 존재하지 않기 때문에 발생하였다. Reflection ray는 TLAS를 통해 화면 밖 기하를 탐색하여 이 구조적 누락을 해결하였다. 재귀 깊이 2에서는 1회 반사까지만 열려 벽과 그림자가 주로 반사되었으나, Depth 5에서는 `Camera → Floor → Left Box → Right Box → Helmet` 체인이 완성되어 헬멧 반사가 바닥과 좌측 박스 우측면에 나타났다. 본 실험 장면에서 반사 결과는 Depth 5 부근에서 수렴하였으며, 그 이상의 재귀 깊이는 추가적인 시각적 변화 없이 비용만 증가하였다.
+
+### 4.6.7 Depth별 반사 관찰 결과
+
+Reflection Depth를 단계별로 증가시키면서 각 Depth에서 관찰된 반사 패턴을 정리한다. 실험 Scene은 좌측 박스(Left Mirror Box)가 우측 박스(Right Mirror Box)를 향하고, 우측 박스가 헬멧을 향하도록 배치하여 `Camera → Floor → Left Box → Right Box → Helmet` 반사 체인을 구성하였다.
+
+**Depth 2 (1회 반사):**
+
+좌측 박스 좌측면은 주로 왼쪽 녹색 벽과 이동의 그림자 영역을 반사한다. 좌측 박스 우측면은 아직 우측 박스 영역에 도달하지 못하므로 이동의 벽/일부만 보인다. 우측 박스 좌측면과 우측면도 대부분 벽과 그림자만 보이며, 헬멧 정보는 거의 나타나지 않는다. 바닥은 거울 반사로 박스 실루엣과 관련 반사를 일부 보여주지만, 반사 체인이 짧아 헬멧까지는 보이지 않는다.
+
+**Depth 3 (2회 반사):**
+
+좌측 박스 좌측면은 여전히 녹색 벽 중심이라 변화가 없다. 좌측 박스 우측면에는 우측 박스가 보이기 시작하므로 Depth 2보다 정보량이 늘어난다. 우측 박스 좌측면은 좌측 박스도 방 내부 일부를 반사하지만 헬멧은 아직 미약하게만 보인다. 우측 박스 우측면은 빨간 벽과 그림자 영향이 커서 변화가 있다. 바닥에는 `Floor → Left Box → Right Box` 경로가 열리면서 박스 간 재귀 반사가 더 명확해진다.
+
+**Depth 5 (4회 반사):**
+
+좌측 박스 좌측면은 여전히 녹색 벽을 주로 보기 때문에 Depth 증가에 따른 변화가 없다. 좌측 박스 우측면은 핵심 변화 지점으로, `Left Box → Right Box → Helmet` 경로가 열리면서 우측 박스 안에 헬멧 반사가 나타난다. 우측 박스 좌측면은 헬멧에 인접한 면이므로 헬멧 관련 반사 정보를 일부 포함하나 낮은 Depth에서도 일부 보여 변화 폭이 적다. 우측 박스 우측면은 빨간 벽과 그림자 쪽을 향해 변화가 제한된다. 바닥에는 `Floor → Left Box → Right Box → Helmet` 체인이 완성되어 헬멧 반사까지 포함되며, Depth 3보다 가장 명확한 차이를 만든다. Depth 5 이상에서는 헬멧이 완전한 거울 재질이 아니므로 추가 반사 정보가 거의 발생하지 않으며, 반사 결과는 Depth 5 부근에서 사실상 수렴하는 모습을 보였다.
 
 ## 4.7 Phase 6. Glossy Reflection: Prefiltered Environment Map vs Glossy Reflection Ray
 
@@ -814,7 +851,7 @@ RT 1-SPP GI buffer
 5. Phase 4: Legacy 재질 경로와 PBR 전환 후 FlightHelmet 비교
 6. Phase 4: AO/Roughness/Metallic/Normal debug view의 Raster/RT 비교
 7. Phase 5: SSR screen-edge/off-screen/depth-discontinuity 대 reflection ray
-8. Phase 5: Reflection depth 1/2/4 비교
+8. Phase 5: Reflection Depth 2/3/5 비교 — 반사 체인 진행 단계별 캡처
 9. Phase 6: Prefiltered environment map 대 RT glossy reflection
 10. Phase 7: Raster GI 대 RT 1/2-bounce color bleeding
 11. 구현 과정 bug 사례: seam, acne, peter-panning, ray epsilon light leak
@@ -850,8 +887,12 @@ RT 1-SPP GI buffer
 | Legacy Material | FlightHelmet ORM 미로딩 | specular가 사라지고 금속/가죽 구분이 약함 | 검은 fallback texture와 비활성화된 RT specular | BRDF 이전에 material data path 검증 필요 |
 | PBR Debug View | AO/Roughness/Metallic/Normal | 채널별 재질 패턴과 Raster/RT 차이를 직접 확인 | 합성 lighting을 우회해 입력 데이터를 출력 | 재질 오류와 lighting 오류를 분리 가능 |
 | Shared PBR | 공통 ORM 및 Cook-Torrance | 두 경로에서 metallic/roughness 기반 표면 반응 | 공통 material table과 `EvaluatePBR` | 이후 visibility 비교의 shading 통제 조건 |
-| Raster SSR | fixed settings | off-screen 누락 | 현재 화면 color/depth만 조회 | 화면 밖 정보 복원 불가 |
-| RT Reflection | depth 1/2 | 단일/다중 반사 | TLAS 대상 월드 공간 재귀 ray query | 화면 밖 및 다중 반사 표현 |
+| Raster SSR | screen-edge 반사 | 경계 방향 반사가 끊김 | UV 이탈 시 buffer 조회 실패 | edge fade로 완화 가능, 구조적 누락은 유지 |
+| Raster SSR | off-screen 반사 대상 | 반사가 완전히 누락됨 | color/depth buffer에 해당 물체 정보 없음 | 화면 밖 정보 복원 불가 |
+| Raster SSR | 박스 모서리 depth discontinuity | 잘못된 반사 교차 또는 왜곡 | ray march가 depth 급변 구간을 가로질러 오판 | step 수 조정으로 부분 완화, 근본 해결 불가 |
+| RT Reflection | Depth 2 (1회 반사) | 벽·그림자가 주로 반사됨, 헬멧 미관찰 | 1회 반사 광로만 열림 | 반사 체인의 첫 단계 |
+| RT Reflection | Depth 3 (2회 반사) | 좌측 박스 우측면에 우측 박스 등장 | 2회 반사로 Box–Box 경로 열림 | 바닥-박스 간 재귀 반사 더 명확 |
+| RT Reflection | Depth 5 (4회 반사) | 헬멧 반사가 바닥·좌측 박스 우측면에 등장, 체인 완성 | 4회 반사로 Camera→Floor→Left→Right→Helmet 완성 | Depth 5 이상에서 추가 변화 없이 수렴 |
 | Raster Glossy | roughness 0.3 | 안정적, parallax 오차 | 위치가 압축된 prefiltered cubemap | 안정성과 위치 정확도의 교환 |
 | RT Glossy | roughness 0.3, 1 spp/frame + TAA | 누적 전 noise, 누적 후 roughness blur 관찰 가능 | 현재 hit 위치의 GGX 방향 sampling | 정확한 가시성과 시간 누적 필요성 |
 | Raster GI H | 공통 diffuse 재질, environment irradiance | 색 영향이 넓고 균일하게 퍼짐 | 방향 중심의 저주파 환경 정보 | 안정적이나 위치별 전달 경로 구분 제한 |
