@@ -1185,9 +1185,9 @@ void D3D12RaytracingMiniEngineSample::Update( float deltaT )
         m_CameraController->Update(deltaT);
     }
 
-    // Auto-enable TAA for stochastic GI modes so samples accumulate over frames;
-    // disable for deterministic reflection/raster modes to prevent ghosting.
-    TemporalEffects::EnableTAA = (rayTracingMode == RTM_GI_RT || rayTracingMode == RTM_GI_RASTER);
+    // RT GI advances its stochastic diffuse sample every frame, so TAA accumulates it.
+    // Raster GI is deterministic and does not need temporal accumulation.
+    TemporalEffects::EnableTAA = (rayTracingMode == RTM_GI_RT);
 
     // We use viewport offsets to jitter sample positions from frame to frame (for TAA.)
     // D3D has a design quirk with fractional offsets such that the implicit scissor

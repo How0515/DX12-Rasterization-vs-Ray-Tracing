@@ -414,7 +414,7 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
             giPayload.SkipShading    = false;
             giPayload.RayHitT        = FLT_MAX;
             giPayload.Color          = float3(0, 0, 0);
-            giPayload.RecursionDepth = 1;
+            giPayload.RecursionDepth = payload.RecursionDepth + 1;
 
             RayDesc giRay;
             giRay.Origin    = worldPos + normal * 1e-4f;
@@ -614,7 +614,7 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         giPayload.SkipShading    = false;
         giPayload.RayHitT        = FLT_MAX;
         giPayload.Color          = float3(0, 0, 0);
-        giPayload.RecursionDepth = 1;
+        giPayload.RecursionDepth = payload.RecursionDepth + 1;
 
         RayDesc giRay;
         giRay.Origin    = worldPosition + normal * 1e-4f;
