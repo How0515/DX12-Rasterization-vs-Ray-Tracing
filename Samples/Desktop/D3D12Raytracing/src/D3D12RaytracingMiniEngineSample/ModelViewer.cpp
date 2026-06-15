@@ -74,7 +74,8 @@ __declspec(align(16)) struct HitShaderConstants
     Vector3 pointLightColor;
     float   boxARoughness;
     UINT32  useGlossyIS;  // 1 = GGX IS for rough metallic (RTM_GLOSSY); 0 = pure mirror
-    float   _pad[2];
+    UINT32  giScene;      // 1 = Stage 11 GI: Box A (matID 104) becomes diffuse white
+    float   _pad[1];
 };
 
 ByteAddressBuffer          g_hitConstantBuffer;
@@ -106,7 +107,7 @@ enum RaytracingTypes
 
 const static UINT MaxRayRecursion = 5;  // primary(1) + refl×4(5); shadows blocked at callerDepth≥2
 
-const static UINT c_NumCameraPositions = 11;
+const static UINT c_NumCameraPositions = 14;
 
 struct RaytracingDispatchRayInputs
 {
@@ -1035,6 +1036,24 @@ m_CameraPosArray[10].position = Vector3(0.60f, 0.90f, -1.85f);
 m_CameraPosArray[10].heading  = 3.14159f + 0.28f;
 m_CameraPosArray[10].pitch    = -0.08f;
 
+// 11. GI overview — elevated center view framing both boxes and all four colored walls.
+//     Good for observing ambient color bleeding from the red/green walls onto the diffuse Box A.
+m_CameraPosArray[11].position = Vector3(0.0f, 1.05f, -2.70f);
+m_CameraPosArray[11].heading  = 3.14159f;
+m_CameraPosArray[11].pitch    = -0.18f;
+
+// 12. GI color bleed — low side view along the red wall.
+//     Red wall on the left, diffuse Box A in the center; highlights red color bleeding onto Box A.
+m_CameraPosArray[12].position = Vector3(-0.80f, 0.55f, -1.20f);
+m_CameraPosArray[12].heading  = 3.14159f + 0.40f;
+m_CameraPosArray[12].pitch    = -0.05f;
+
+// 13. GI diffuse bounce — close view of the floor between Box A and the back wall.
+//     Shows indirect illumination from the area light bouncing off Box A onto the floor.
+m_CameraPosArray[13].position = Vector3(-0.30f, 0.15f, 0.20f);
+m_CameraPosArray[13].heading  = 3.14159f - 0.20f;
+m_CameraPosArray[13].pitch    = -0.10f;
+
 SetCameraToPredefinedPosition(1);
 }
 
@@ -1059,40 +1078,50 @@ void D3D12RaytracingMiniEngineSample::Update( float deltaT )
         DebugZoom.Increment();
     // --- Raster modes ---
     else if (GameInput::IsFirstPressed(GameInput::kKey_1))
-        rayTracingMode = RTM_RASTER;
+        { rayTracingMode = RTM_RASTER;                  Sponza::m_GIScene = 0; }
     else if (GameInput::IsFirstPressed(GameInput::kKey_2))
-        rayTracingMode = RTM_OFF;
+        { rayTracingMode = RTM_OFF;                     Sponza::m_GIScene = 0; }
     else if (GameInput::IsFirstPressed(GameInput::kKey_3))
-        rayTracingMode = RTM_SSR;
+        { rayTracingMode = RTM_SSR;                     Sponza::m_GIScene = 0; }
     // --- RT modes ---
     else if (GameInput::IsFirstPressed(GameInput::kKey_4))
-        rayTracingMode = RTM_DIFFUSE_WITH_SHADOWMAPS;
+        { rayTracingMode = RTM_DIFFUSE_WITH_SHADOWMAPS; Sponza::m_GIScene = 0; }
     else if (GameInput::IsFirstPressed(GameInput::kKey_5))
-        rayTracingMode = RTM_DIFFUSE_WITH_SHADOWRAYS;
+        { rayTracingMode = RTM_DIFFUSE_WITH_SHADOWRAYS; Sponza::m_GIScene = 0; }
     else if (GameInput::IsFirstPressed(GameInput::kKey_6))
     {
         rayTracingMode = RTM_REFLECTIONS;
         g_MaxRecursionDepth = 1;
+        Sponza::m_GIScene = 0;
     }
     else if (GameInput::IsFirstPressed(GameInput::kKey_7))
     {
         rayTracingMode = RTM_REFLECTIONS;
         g_MaxRecursionDepth = 2;
+        Sponza::m_GIScene = 0;
     }
     else if (GameInput::IsFirstPressed(GameInput::kKey_8))
     {
         rayTracingMode = RTM_REFLECTIONS;
         g_MaxRecursionDepth = 4;
+        Sponza::m_GIScene = 0;
     }
     // --- Glossy modes ---
     else if (GameInput::IsFirstPressed(GameInput::kKey_9))
-        rayTracingMode = RTM_RASTER_GLOSSY;
+        { rayTracingMode = RTM_RASTER_GLOSSY;           Sponza::m_GIScene = 0; }
     else if (GameInput::IsFirstPressed(GameInput::kKey_0))
     {
         rayTracingMode = RTM_GLOSSY;
         g_MaxRecursionDepth = 1;
+        Sponza::m_GIScene = 0;
     }
-    else if (GameInput::IsFirstPressed(GameInput::kKey_g)) { /* TODO: Raster GI    */ }
+    // --- GI modes ---
+    else if (GameInput::IsFirstPressed(GameInput::kKey_g))
+    {
+        Sponza::m_GIScene = 1;  // activate GI scene: Box A → diffuse white
+        m_CameraPosArrayCurrentPosition = 11;
+        SetCameraToPredefinedPosition(m_CameraPosArrayCurrentPosition);
+    }
     else if (GameInput::IsFirstPressed(GameInput::kKey_h)) { /* TODO: RT GI        */ }
     else if (GameInput::IsFirstPressed(GameInput::kKey_j)) { /* TODO: RT GI+Denoise*/ }
     // --- Camera presets ---
@@ -1105,6 +1134,12 @@ void D3D12RaytracingMiniEngineSample::Update( float deltaT )
     {
         // Glossy comparison: floor-level view (preset 9); cycle with arrows to reach preset 10.
         m_CameraPosArrayCurrentPosition = 9;
+        SetCameraToPredefinedPosition(m_CameraPosArrayCurrentPosition);
+    }
+    else if (GameInput::IsFirstPressed(GameInput::kKey_u))
+    {
+        // GI overview (preset 11); cycle with arrows to reach presets 12-13.
+        m_CameraPosArrayCurrentPosition = 11;
         SetCameraToPredefinedPosition(m_CameraPosArrayCurrentPosition);
     }
     
@@ -1415,6 +1450,7 @@ void D3D12RaytracingMiniEngineSample::RaytraceDiffuse(
     hitShaderConstants.debugView       = (UINT32)(int)g_DebugView;
     hitShaderConstants.boxARoughness   = (float)Sponza::m_BoxARoughness;
     hitShaderConstants.useGlossyIS     = (rayTracingMode == RTM_GLOSSY) ? 1u : 0u;
+    hitShaderConstants.giScene         = Sponza::m_GIScene;
     context.WriteBuffer(g_hitConstantBuffer, 0, &hitShaderConstants, sizeof(hitShaderConstants));
     context.WriteBuffer(g_dynamicConstantBuffer, 0, &inputs, sizeof(inputs));
 
@@ -1476,6 +1512,7 @@ void D3D12RaytracingMiniEngineSample::RaytraceReflections(
     hitShaderConstants.debugView       = (UINT32)(int)g_DebugView;
     hitShaderConstants.boxARoughness   = (float)Sponza::m_BoxARoughness;
     hitShaderConstants.useGlossyIS     = 0u;  // reflection sub-pass always uses mirror
+    hitShaderConstants.giScene         = Sponza::m_GIScene;
     context.WriteBuffer(g_hitConstantBuffer, 0, &hitShaderConstants, sizeof(hitShaderConstants));
     context.WriteBuffer(g_dynamicConstantBuffer, 0, &inputs, sizeof(inputs));
 

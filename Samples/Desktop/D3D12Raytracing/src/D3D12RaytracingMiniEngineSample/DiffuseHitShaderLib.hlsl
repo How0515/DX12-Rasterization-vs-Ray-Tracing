@@ -311,12 +311,12 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
 
         if (materialID == 106)
         {
-            ProcMat lm = GetProceduralMaterial(106, BoxARoughness);
+            ProcMat lm = GetProceduralMaterial(106, BoxARoughness, GIScene);
             payload.Color = lm.baseColor;
             return;
         }
 
-        ProcMat pm         = GetProceduralMaterial(materialID, BoxARoughness);
+        ProcMat pm         = GetProceduralMaterial(materialID, BoxARoughness, GIScene);
         float3 diffuseContrib = pm.baseColor * (1.0 - pm.metallic);
         float3 specularAlbedo = lerp(float3(0.04, 0.04, 0.04), pm.baseColor, pm.metallic);
         float  roughness      = pm.roughness;

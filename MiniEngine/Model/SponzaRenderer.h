@@ -61,6 +61,7 @@ namespace Sponza
     extern Math::Vector3 m_PointLightColor;
     extern uint32_t      m_DebugView;
     extern uint32_t      m_GlossyIBLEnabled; // 1 when RTM_RASTER_GLOSSY is active
+    extern uint32_t      m_GIScene;          // 1 when Stage 11 GI mode is active (Box A → diffuse)
     extern NumVar        m_BoxARoughness; // [0,1] roughness for Box A; Box B stays as mirror
 
     // -------------------------------------------------------------------------
