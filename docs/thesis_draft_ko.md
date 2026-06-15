@@ -216,6 +216,8 @@ Cornell Box를 선택한 이유는 다음과 같다.
 
 완전한 동일 조건을 유지하기 어려운 경우에는 차이를 명시한다. 예를 들어 Raster 면광원 직접광은 제한된 대표 점을 사용하고, RT 면광원 그림자는 64개 광원 위치를 사용한다. 이러한 차이는 결과 해석 시 알고리즘 구성의 일부로 기록한다.
 
+GI 비교 모드에서는 재질 차이가 결과를 오염시키지 않도록 추가 통제를 적용하였다. H(Raster GI), G(RT GI 1-bounce), J(RT GI 2-bounce)가 활성화되면 면광원 패널을 제외한 절차적 표면과 textured mesh의 metallic 값을 0으로 설정하고 roughness를 최소 0.9로 맞춘다. 이에 따라 바닥과 Box A/B의 거울 반사는 제거되며, 세 모드의 차이는 환경 기반 간접광 근사와 diffuse secondary ray의 차이로 제한된다. 일반 reflection 및 glossy 모드에서는 기존 metallic 재질을 유지한다.
+
 ## 3.4 비교 프레임워크의 모드
 
 현재 구현의 주요 비교 모드는 다음과 같다.
@@ -234,6 +236,8 @@ Cornell Box를 선택한 이유는 다음과 같다.
 | RT GI | Cosine-weighted diffuse secondary ray, 1/2-bounce depth control |
 
 이 구조는 효과별 비교뿐 아니라 혼합 조합을 분석할 수 있게 한다. 예를 들어 primary visibility는 RT를 사용하면서 그림자는 shadow map으로 계산하는 모드를 통해, primary ray와 shadow ray의 영향을 분리할 수 있다.
+
+GI 실험 단축키는 G=RT GI 1-bounce, H=Raster GI, J=RT GI 2-bounce로 구성하였다. 화면 UI에는 현재 모드, 재귀 깊이, TAA 활성 상태 및 단축키 범례를 표시하여 캡처 조건을 확인할 수 있게 하였다. 구현 과정에서 secondary payload의 재귀 깊이가 올바르게 증가하지 않던 문제를 수정하였고, 현재는 G와 J가 각각 의도한 1/2-bounce 깊이를 사용한다. TAA는 확률적 RT Glossy 및 RT GI에서만 활성화하고 deterministic Raster GI와 mirror 모드에서는 비활성화한다.
 
 ## 3.5 평가 관점
 
@@ -292,6 +296,8 @@ Cornell Box를 선택한 이유는 다음과 같다.
 | Reflection | depth 0, 1, 2, 4 | 반사 누락, 재귀 깊이에 따른 표현 범위 |
 | Glossy | roughness, frame accumulation | blur 정확도, noise, 수렴 |
 | GI | bounce 1/2, 누적 frame | color bleeding, 위치별 차폐, noise, 수렴 |
+
+카메라 프리셋 전환은 변수 조절용 좌우 방향키와 충돌하지 않도록 상하 방향키로 분리하였다. 이를 통해 roughness 또는 광원 계수를 변경하는 동안 동일 카메라 구도를 유지할 수 있다.
 
 ---
 
@@ -473,7 +479,7 @@ Raster 경로는 startup 과정에서 environment cubemap을 capture하고, GGX 
 
 ### 4.7.3 RT Glossy 경로
 
-RT 경로는 roughness와 surface normal을 사용하여 GGX half-vector를 importance sampling하고, 해당 방향으로 reflection ray를 발사한다. Frame index 기반 sample을 사용하고 TAA를 통해 시간적으로 누적한다.
+RT 경로는 roughness와 surface normal을 사용하여 GGX half-vector를 importance sampling하고, 해당 방향으로 reflection ray를 발사한다. 현재 구현은 metallic hit마다 frame당 reflection ray 1개를 발사하는 1 spp/frame 방식이며, frame index 기반 sample을 TAA로 시간적으로 누적한다. Roughness가 매우 낮은 표면은 확률적 GGX sampling 대신 deterministic mirror 방향을 사용한다.
 
 이 방식은 현재 shading point에서 실제 장면을 질의하므로 위치 종속 반사와 차폐를 반영할 수 있다. 반면 frame당 sample 수가 제한되면 noise가 발생하고, 카메라 또는 물체가 움직일 때 누적 history의 유효성이 감소한다.
 
@@ -501,15 +507,23 @@ Raster GI 경로는 surface normal 방향으로 environment cubemap의 높은 mi
 
 RT GI 경로는 diffuse 표면에서 cosine-weighted hemisphere 방향을 생성하고 secondary ray를 발사한다. Secondary hit에서 얻은 radiance를 현재 표면의 diffuse color와 결합하며, 최대 재귀 깊이를 1 또는 2로 설정하여 간접광의 전달 범위를 비교한다. Cornell 스타일 장면의 색 벽과 흰 표면을 이용하여 위치별 color bleeding과 추가 bounce에 따른 광 전달 변화를 관찰한다.
 
-현재 구현은 Cornell 장면의 절차적 diffuse 표면에 대해 1-bounce와 2-bounce를 지원한다. 다만 multiple importance sampling과 production 수준 denoiser는 포함하지 않으며, textured mesh의 GI 경로는 1-bounce로 제한된다. 따라서 정적 카메라에서는 TAA 시간 누적으로 경향을 확인할 수 있지만, 낮은 sample 수에서는 noise가 남는다.
+현재 구현은 각 diffuse hit에서 GI continuation ray를 1개만 생성하는 1 spp/frame progressive path tracing 구조이다. 여기서 면광원 직접광을 계산하는 64개 ray는 GI 경로를 64갈래로 분기하는 ray가 아니라, 각 shading hit에서 면광원 sample의 가시성을 확인하는 shadow ray이다. 따라서 G의 최악 조건은 primary ray 1개, primary/secondary hit의 shadow ray 각 64개, GI continuation ray 1개로 약 130회의 ray query이며, J는 두 번째 GI continuation ray가 추가되어 약 131회의 ray query가 된다. 재귀 깊이 2의 hit에서는 RTPSO 재귀 제한을 피하기 위해 추가 shadow ray 발사를 생략한다.
+
+절차적 diffuse 표면은 1-bounce와 2-bounce를 지원하지만 textured mesh의 GI 경로는 1-bounce로 제한된다. 또한 multiple importance sampling과 production 수준 denoiser는 포함하지 않는다. 정적 카메라에서는 매 frame 다른 cosine-weighted 방향을 선택하고 TAA로 누적하여 경향을 확인할 수 있지만, 낮은 sample 수에서는 noise가 남는다.
 
 ### 4.8.4 비교 결과 해석
 
 Environment 기반 GI는 위치 종속성을 제거하여 매우 압축된 형태의 간접광을 제공한다. RT GI는 실제 secondary visibility와 hit radiance를 사용하여 위치별 색 번짐과 차폐를 표현할 수 있다. 그러나 GI는 shadow나 mirror reflection보다 적분 차원이 높기 때문에 RT 비용과 noise 문제가 가장 크게 나타나는 단계이다.
 
+실제 관찰에서 H는 색 벽의 영향이 장면 전체에 비교적 균일하게 퍼져 color bleeding처럼 보였지만, 이는 특정 벽과 표면 사이의 실제 전달 경로를 구분한 결과라기보다 environment irradiance가 제공하는 저주파 색조에 가깝다. G와 J는 국소 위치에 따른 색 번짐을 표현할 수 있으나 1 spp/frame의 강한 noise 때문에 누적 전 화면에서는 차이를 판독하기 어려웠다.
+
+초기 J 실험에서는 G보다 거울 안의 거울이 더 보이는 현상이 관찰되었다. 그러나 이는 2-bounce diffuse GI의 증거가 아니라 GI 장면에 남아 있던 metallic 바닥과 Box B가 reflection 경로를 생성한 교란 요인이었다. 이후 H/G/J 모두의 비발광 재질을 rough diffuse로 통일하여 거울 반사를 제거하였다. 따라서 수정 후 J의 관찰 대상은 mirror-in-mirror가 아니라 G에 비해 추가된 두 번째 diffuse bounce가 만드는 간접광 전달 범위와 국소 색 변화이다.
+
+그러나 재질 통제 이후에도 RT GI의 높은 sampling variance로 인해 G와 J의 국소 색 번짐 및 bounce 차이를 안정적으로 판독하기 어려웠다. 현재 결과는 RT GI가 위치 종속 간접광을 계산할 수 있다는 파이프라인 구조와 noise 발생 원인을 확인하는 데에는 유효하지만, 1-bounce와 2-bounce의 화질 차이를 최종적으로 입증하는 수렴 영상으로 사용하기에는 부족하다. 이 관찰 한계 자체를 1 spp 실시간 RT와 후처리 의존성의 사례로 기록하고, 더 높은 SPP 또는 GI 전용 denoising은 후속 연구로 남긴다.
+
 ### 4.8.5 결과 작성용 문장
 
-> Environment irradiance 기반 raster GI는 안정적인 저주파 간접광을 제공하였으나, 위치별 차폐와 색 번짐을 구분하지 못하였다. Diffuse secondary ray는 색상이 다른 벽과 인접한 표면에서 위치 종속 color bleeding을 생성했으며, 2-bounce 모드는 추가적인 광 전달을 표현하였다. 그러나 제한된 sample 수로 인해 noise와 시간 누적 의존성이 나타났다.
+> Environment irradiance 기반 raster GI는 안정적인 저주파 간접광을 제공하였으나, 위치별 차폐와 색 번짐을 구분하지 못하였다. Diffuse secondary ray는 실제 hit 위치와 재귀 경로를 사용하므로 위치 종속 color bleeding과 추가 bounce를 계산할 수 있지만, 본 구현의 1 spp/frame 결과에서는 높은 variance가 해당 차이를 가렸다. 따라서 현재 실험은 GI 질의 구조의 차이와 시간 누적의 필요성을 확인하였으며, 수렴된 1/2-bounce 화질 비교는 다중 sample 또는 denoising을 요구하는 후속 과제로 남는다.
 
 ---
 
@@ -578,6 +592,8 @@ RT는 근사 표현에서 누락된 월드 공간 정보를 복원하는 것이 
 - stochastic jitter
 - GGX importance sampling noise
 - TAA history와 카메라 이동
+- 확률적 RT 효과와 deterministic raster 효과에 대한 TAA 활성 조건 분리
+- 1 spp/frame 결과와 hit별 64개 면광원 shadow ray의 역할 구분
 
 ### 5.4.4 엔진 리소스 및 파이프라인
 
@@ -585,6 +601,7 @@ RT는 근사 표현에서 누락된 월드 공간 정보를 복원하는 것이 
 - UAV/SRV resource transition
 - shader payload 초기화
 - RTPSO recursion depth 제한
+- GI secondary payload의 recursion depth 전달 오류
 - raster/RT material 및 emissive 처리 불일치
 
 이러한 문제는 최종 이미지 품질뿐 아니라 두 렌더링 방식의 내부 구조를 이해하는 학습 과정 자체가 연구 결과임을 보여준다.
@@ -633,9 +650,59 @@ Cornell 스타일 장면은 복잡한 production scene의 성능과 다양성을
 
 ## 6.4 Sampling과 Denoising
 
-RT glossy 및 GI는 확률적 sample을 사용하지만 production 수준의 denoiser는 구현되지 않았다. TAA는 시간 누적에 도움을 주지만, disocclusion과 빠른 카메라 이동에서 ghosting 또는 history invalidation 문제가 발생할 수 있다. 향후 SVGF, ReBLUR 또는 효과별 temporal-spatial filter와 유사한 구조를 검토할 필요가 있다.
+RT glossy 및 GI는 모두 frame당 확률적 ray 1개를 선택하고 TAA를 활성화하여 시간적으로 누적한다. Raster GI와 deterministic mirror 모드는 확률적 sample 누적이 필요하지 않으므로 TAA를 비활성화한다. 현재 TAA는 엄밀한 독립 sample 평균이나 production 수준 denoiser가 아니라 history blending 기반의 시간 필터이므로, disocclusion과 빠른 카메라 이동에서 ghosting 또는 history invalidation 문제가 발생할 수 있다. 향후 SVGF, ReBLUR 또는 효과별 temporal-spatial filter와 유사한 구조를 검토할 필요가 있다.
 
-## 6.5 향후 연구
+현재 확률적 RT 파이프라인은 다음과 같이 요약할 수 있다.
+
+```text
+RayGen: primary ray 1개/px
+    → closest-hit: glossy 또는 GI continuation ray 1개/hit
+    → 직접광 및 간접광을 scene color에 합산
+    → 공용 TAA history blend
+    → output
+```
+
+이 구조에서는 한 frame의 확률적 sample 수가 1개이므로 variance가 매우 높다. 또한 공용 TAA는 현재 color와 history를 가중 혼합하고 neighborhood clipping 및 motion 정보를 적용하는 시간 필터이며, 독립 sample의 단순 산술 평균으로 무한히 수렴하는 accumulation buffer와는 다르다. 카메라 이동과 disocclusion에서는 과거 frame의 표면 대응이 틀어져 ghosting과 blur가 함께 발생할 수 있다. GI가 scene color에 직접 합산되므로 direct lighting, reflection 및 GI의 variance와 history를 효과별로 분리하여 조절할 수도 없다.
+
+## 6.5 노이즈로 인한 관찰 한계와 단계별 후속 연구
+
+현재 구현에서 가장 큰 관찰 한계는 알고리즘이 GI 경로를 생성하지 못하는 것이 아니라, 생성된 결과의 variance가 커서 H/G/J의 차이를 안정적으로 판독하기 어렵다는 점이다. 이를 해결하기 위한 후속 구현은 다음 세 단계로 구분할 수 있다.
+
+### 6.5.1 Level 1: N-SPP 파라미터화
+
+가장 직접적인 방법은 frame당 확률적 ray 수를 1/4/8 등으로 변경하고 평균하는 것이다. 이 프로젝트에서는 두 가지 범위를 구분해야 한다.
+
+1. RayGen에서 primary path 전체를 N회 반복하면 진정한 N spp에 가깝지만, primary traversal, hit shading 및 hit별 64개 면광원 shadow ray까지 함께 반복되어 비용이 거의 N배 증가한다.
+2. Closest-hit shader에서 glossy 또는 GI continuation ray만 N개 발사하여 평균하면 효과별 noise를 직접 줄이고 기존 primary ray를 재사용할 수 있다. 다만 각 secondary hit의 직접광 계산 비용은 여전히 크다.
+
+N-SPP 파라미터화는 SPP 증가에 따른 noise 감소와 실행 비용 증가를 직접 비교할 수 있으므로, 품질-비용 trade-off를 설명하는 후속 실험에 가장 적합하다. 구현 난이도는 낮지만 실시간 성능은 sample 수에 비례하여 감소한다.
+
+### 6.5.2 Level 2: GI 버퍼 분리와 공간 필터
+
+두 번째 단계는 GI를 scene color에 즉시 더하지 않고 별도의 `g_GIBuffer`에 저장하는 것이다. 이후 depth와 normal을 guide로 사용하는 5×5 또는 7×7 bilateral compute filter를 적용하고, 필터링된 GI를 direct lighting과 합성한다.
+
+```text
+RT 1-SPP GI buffer
+    → depth/normal-guided bilateral filter
+    → GI temporal accumulation
+    → direct lighting과 composite
+```
+
+이 구조는 geometry edge를 가능한 한 보존하면서 동일 표면 내부의 고주파 noise를 줄이고, GI에만 강한 필터를 적용할 수 있다. 반면 GI 전용 UAV/SRV, compute pass, resource transition 및 composite 경로가 추가되며, 얇은 기하와 접촉부에서는 blur 또는 light leak가 발생할 수 있다.
+
+### 6.5.3 Level 3: SVGF 기반 시공간 Denoising
+
+더 높은 품질을 목표로 할 경우 motion vector를 이용한 history reprojection, temporal accumulation, variance estimation 및 여러 단계의 À-trous wavelet filter로 구성된 SVGF 계열 구조를 적용할 수 있다. 이 방식은 1 spp 입력에서도 시간·공간 정보를 함께 사용하여 noise를 크게 줄일 수 있지만, history validation, disocclusion 처리, variance buffer 및 반복 compute pass가 필요하다. 본 프로젝트의 범위를 크게 확장하므로, denoising 자체를 핵심 기여로 삼는 후속 연구에 적합하다.
+
+| 후속 목표 | 권장 단계 | 기대 결과 |
+|---|---|---|
+| SPP와 품질·비용 관계 비교 | Level 1 N-SPP | 1/4/8 spp 비교표 및 noise 감소 경향 |
+| 최종 GI 비주얼 개선 | Level 2 GI 버퍼 + bilateral filter | 효과별 공간 필터와 안정된 캡처 |
+| 실시간 RT denoising 연구 | Level 3 SVGF | variance-guided 시공간 복원 |
+
+현 프로젝트의 자연스러운 확장 순서는 Level 1로 sample 수에 따른 관찰 가능성을 먼저 확인한 뒤, Level 2에서 GI를 독립 버퍼로 분리하는 것이다. Level 3은 구현 비용이 크므로 별도의 연구 범위로 남긴다.
+
+## 6.6 기타 향후 연구
 
 - Raster confidence 기반 선택적 shadow/reflection ray
 - Ray budget의 화면 중요도 기반 동적 배분
@@ -693,9 +760,10 @@ RT glossy 및 GI는 확률적 sample을 사용하지만 production 수준의 den
 | Raster SSR | fixed settings | off-screen 누락 | 현재 화면 color/depth만 조회 | 화면 밖 정보 복원 불가 |
 | RT Reflection | depth 1/2 | 단일/다중 반사 | TLAS 대상 월드 공간 재귀 ray query | 화면 밖 및 다중 반사 표현 |
 | Raster Glossy | roughness 0.3 | 안정적, parallax 오차 | 위치가 압축된 prefiltered cubemap | 안정성과 위치 정확도의 교환 |
-| RT Glossy | roughness 0.3 | noise, 위치 정확도 | 현재 hit 위치의 GGX 방향 sampling | 정확한 가시성과 sampling variance |
-| Raster GI | environment irradiance | 균일한 간접광 | 방향 중심의 저주파 환경 정보 | 위치별 차폐와 색 번짐 제한 |
-| RT GI | 1/2-bounce | color bleeding, noise | 재귀 diffuse secondary ray | 위치 종속 간접광과 누적 필요성 |
+| RT Glossy | roughness 0.3, 1 spp/frame + TAA | 누적 전 noise, 누적 후 roughness blur 관찰 가능 | 현재 hit 위치의 GGX 방향 sampling | 정확한 가시성과 시간 누적 필요성 |
+| Raster GI H | 공통 diffuse 재질, environment irradiance | 색 영향이 넓고 균일하게 퍼짐 | 방향 중심의 저주파 환경 정보 | 안정적이나 위치별 전달 경로 구분 제한 |
+| RT GI G | 공통 diffuse 재질, 1-bounce, 1 spp/frame + TAA | 강한 초기 noise, 국소 색 변화는 누적 후 검증 필요 | cosine-weighted diffuse secondary ray 1개 | 위치 종속 간접광과 시간 누적 필요성 |
+| RT GI J | 공통 diffuse 재질, 2-bounce, 1 spp/frame + TAA | 추가 diffuse 전달 가능, noise로 판독 어려움 | 두 번째 diffuse continuation ray | 충분한 누적 또는 denoising 필요 |
 
 ---
 
@@ -713,6 +781,7 @@ RT glossy 및 GI는 확률적 sample을 사용하지만 production 수준의 den
 8. Importance Sampling 및 Monte Carlo integration
 9. Real-time ray tracing denoising
 10. Hybrid rendering 및 production ray tracing 사례
+11. Schied et al., *Spatiotemporal Variance-Guided Filtering: Real-Time Reconstruction for Path-Traced Global Illumination*, 2017
 
 ---
 
