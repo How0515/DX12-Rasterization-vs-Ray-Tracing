@@ -1511,26 +1511,7 @@ void D3D12RaytracingMiniEngineSample::RaytraceReflections(
 
 void D3D12RaytracingMiniEngineSample::RenderUI(class GraphicsContext& gfxContext)
 {
-    TextContext text(gfxContext);
-    text.Begin();
-    text.ResetCursor(10.0f, 10.0f);
-
-    // Line 1: current mode name — yellow for the new Stage 10 glossy modes, grey otherwise.
-    text.SetTextSize(22.0f);
-    const bool isGlossyMode = (rayTracingMode == RTM_RASTER_GLOSSY || rayTracingMode == RTM_GLOSSY);
-    text.SetColor(isGlossyMode ? Color(1.0f, 1.0f, 0.0f) : Color(0.80f, 0.80f, 0.80f));
-    text.DrawFormattedString("Mode: %s\n", rayTracingModes[(int)rayTracingMode]);
-
-    // Line 2: BoxA roughness — key variable for the glossy comparison.
-    text.SetColor(Color(0.65f, 0.90f, 1.0f));
-    text.DrawFormattedString("BoxA Roughness: %.2f\n", (float)Sponza::m_BoxARoughness);
-
-    // Line 3: compact key guide for Stage 10 features.
-    text.SetTextSize(15.0f);
-    text.SetColor(Color(0.50f, 0.50f, 0.50f));
-    text.DrawString("\n[9] Raster+IBL   [0] RT Glossy   [Y] Glossy cam\n");
-
-    text.End();
+    (void)gfxContext;
 }
 
 void D3D12RaytracingMiniEngineSample::Raytrace(class GraphicsContext& gfxContext)
