@@ -1185,9 +1185,11 @@ void D3D12RaytracingMiniEngineSample::Update( float deltaT )
         m_CameraController->Update(deltaT);
     }
 
-    // RT GI advances its stochastic diffuse sample every frame, so TAA accumulates it.
-    // Raster GI is deterministic and does not need temporal accumulation.
-    TemporalEffects::EnableTAA = (rayTracingMode == RTM_GI_RT);
+    // RT glossy and GI advance one stochastic sample per pixel every frame.
+    // Deterministic raster and mirror modes do not need temporal accumulation.
+    TemporalEffects::EnableTAA =
+        rayTracingMode == RTM_GLOSSY ||
+        rayTracingMode == RTM_GI_RT;
 
     // We use viewport offsets to jitter sample positions from frame to frame (for TAA.)
     // D3D has a design quirk with fractional offsets such that the implicit scissor
@@ -1607,7 +1609,7 @@ void D3D12RaytracingMiniEngineSample::RenderUI(class GraphicsContext& gfxContext
     // TAA status (green = on, grey = off)
     bool taaOn = (bool)TemporalEffects::EnableTAA;
     text.SetColor(taaOn ? Color(0.3f, 1.0f, 0.3f) : Color(0.7f, 0.7f, 0.7f));
-    text.DrawFormattedString("TAA: %s", taaOn ? "ON  (accumulating GI samples)" : "OFF");
+    text.DrawFormattedString("TAA: %s", taaOn ? "ON  (accumulating stochastic samples)" : "OFF");
     text.NewLine();
 
     // Key reference (small, grey)
