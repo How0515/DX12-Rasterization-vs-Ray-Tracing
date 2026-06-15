@@ -1575,7 +1575,50 @@ void D3D12RaytracingMiniEngineSample::RaytraceReflections(
 
 void D3D12RaytracingMiniEngineSample::RenderUI(class GraphicsContext& gfxContext)
 {
-    (void)gfxContext;
+    static const char* s_ModeDesc[] = {
+        "1  Raster (PBR direct + ambient)",
+        "2  Raster (direct only, no ambient)",
+        "3  Raster + SSR",
+        "4  RT Diffuse + shadow maps",
+        "5  RT Diffuse + shadow rays",
+        "6/7/8  RT Mirror reflections",
+        "RT Traversal (debug)",
+        "RT Shadows (legacy)",
+        "9  Raster + Glossy IBL",
+        "0  RT Glossy (GGX IS)",
+        "G/J  RT Diffuse GI (path tracing)",
+        "H  Raster GI (diffuse env IBL)",
+    };
+
+    TextContext text(gfxContext);
+    text.Begin();
+    text.EnableDropShadow(true);
+
+    // Current mode (large, yellow)
+    text.SetTextSize(20.0f);
+    text.ResetCursor(10.0f, 10.0f);
+    text.SetColor(Color(1.0f, 0.9f, 0.1f));
+    int mode = (int)rayTracingMode;
+    text.DrawFormattedString("Mode: %s", s_ModeDesc[mode]);
+    if (mode == RTM_REFLECTIONS || mode == RTM_GLOSSY || mode == RTM_GI_RT)
+        text.DrawFormattedString("  [%s bounce]", reflectionDepthLabels[(int)g_MaxRecursionDepth]);
+    text.NewLine();
+
+    // TAA status (green = on, grey = off)
+    bool taaOn = (bool)TemporalEffects::EnableTAA;
+    text.SetColor(taaOn ? Color(0.3f, 1.0f, 0.3f) : Color(0.7f, 0.7f, 0.7f));
+    text.DrawFormattedString("TAA: %s", taaOn ? "ON  (accumulating GI samples)" : "OFF");
+    text.NewLine();
+
+    // Key reference (small, grey)
+    text.NewLine();
+    text.SetTextSize(14.0f);
+    text.SetColor(Color(0.75f, 0.75f, 0.75f));
+    text.DrawString("1=Raster  2=Direct  3=SSR  4=RT  5=RT+ShadowRays  6/7/8=Reflections  9=GlossyIBL  0=GlossyRT");
+    text.NewLine();
+    text.DrawString("G=GI-RT-1x  J=GI-RT-2x  H=GI-Raster  |  U=GI-cam  Y=Glossy-cam  Arrows=cycle  F=freeze-cam");
+
+    text.End();
 }
 
 void D3D12RaytracingMiniEngineSample::Raytrace(class GraphicsContext& gfxContext)
