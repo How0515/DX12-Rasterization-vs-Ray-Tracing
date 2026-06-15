@@ -105,7 +105,7 @@ enum RaytracingTypes
 
 const static UINT MaxRayRecursion = 5;  // primary(1) + refl×4(5); shadows blocked at callerDepth≥2
 
-const static UINT c_NumCameraPositions = 9;
+const static UINT c_NumCameraPositions = 11;
 
 struct RaytracingDispatchRayInputs
 {
@@ -1021,6 +1021,19 @@ m_CameraPosArray[8].position = Vector3(0.0f, 4.00f, 0.0f);
 m_CameraPosArray[8].heading  = 3.14159f;
 m_CameraPosArray[8].pitch    = -1.5707f;
 
+// 9. Glossy comparison: floor-level — metallic floor reflection spans the entire frame.
+//    Raster+IBL (key 9) samples the prefiltered env mip; RT Glossy (key 0) bounces actual GGX rays.
+//    Pitch tilted slightly upward so the floor reflection extends toward the back wall.
+m_CameraPosArray[9].position = Vector3(0.0f, 0.20f, -2.20f);
+m_CameraPosArray[9].heading  = 3.14159f;
+m_CameraPosArray[9].pitch    = 0.05f;
+
+// 10. Glossy comparison: Box A face — diagonal view of the roughness-variable metallic surface.
+//     Set BoxARoughness ~0.3 for a visible but blurred reflection; compare mip-LOD IBL vs GGX IS.
+m_CameraPosArray[10].position = Vector3(0.60f, 0.90f, -1.85f);
+m_CameraPosArray[10].heading  = 3.14159f + 0.28f;
+m_CameraPosArray[10].pitch    = -0.08f;
+
 SetCameraToPredefinedPosition(1);
 }
 
@@ -1081,10 +1094,16 @@ void D3D12RaytracingMiniEngineSample::Update( float deltaT )
     else if (GameInput::IsFirstPressed(GameInput::kKey_g)) { /* TODO: Raster GI    */ }
     else if (GameInput::IsFirstPressed(GameInput::kKey_h)) { /* TODO: RT GI        */ }
     else if (GameInput::IsFirstPressed(GameInput::kKey_j)) { /* TODO: RT GI+Denoise*/ }
-    // --- Camera preset ---
+    // --- Camera presets ---
     else if (GameInput::IsFirstPressed(GameInput::kKey_t))
     {
         m_CameraPosArrayCurrentPosition = 8;
+        SetCameraToPredefinedPosition(m_CameraPosArrayCurrentPosition);
+    }
+    else if (GameInput::IsFirstPressed(GameInput::kKey_y))
+    {
+        // Glossy comparison: floor-level view (preset 9); cycle with arrows to reach preset 10.
+        m_CameraPosArrayCurrentPosition = 9;
         SetCameraToPredefinedPosition(m_CameraPosArrayCurrentPosition);
     }
     
