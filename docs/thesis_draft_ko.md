@@ -1,0 +1,729 @@
+# 논문 초안 v0.1
+
+## 제목 후보
+
+**동일 엔진 내 비교 프레임워크를 통한 래스터 근사 기법과 레이 트레이싱 질의의 파이프라인 수준 분석**
+
+영문 제목:
+
+**Pipeline-Level Analysis of Raster Approximation and Ray-Traced Queries through an In-Engine Comparative Framework**
+
+---
+
+## 초록
+
+실시간 그래픽스에서 래스터라이제이션과 레이 트레이싱은 상호 배타적인 렌더링 방식이 아니라, 요구되는 품질과 성능 조건에 따라 함께 사용되는 보완적 기술이다. 래스터라이제이션은 화면에 투영되는 기하를 효율적으로 처리하지만, 그림자, 반사, 간접광과 같이 화면 밖 또는 다른 시점의 장면 정보가 필요한 효과를 직접 계산하지 못한다. 따라서 shadow map, screen-space reflection, prefiltered environment map, lightmap 및 probe와 같은 근사 기법을 사용한다. 반면 레이 트레이싱은 가속 구조를 대상으로 광선 질의를 수행하여 동일한 효과를 월드 공간에서 직접 계산할 수 있지만, 광선 순회 비용과 확률적 샘플링 노이즈, 엔진 통합 복잡성을 추가로 요구한다.
+
+본 연구는 두 방식의 절대적인 성능 우열을 판정하는 대신, 동일한 DirectX 12 MiniEngine 기반에서 래스터 근사 기법과 대응하는 DXR 기반 질의를 단계적으로 구현하고 비교할 수 있는 실험 프레임워크를 구축한다. 실험 장면은 Cornell Box를 기반으로 단순화하여 복잡한 게임 장면에서 발생하는 변수를 줄이고, 그림자 경계, 화면 공간 정보 손실, 다중 반사, 거친 표면 반사 및 색 번짐과 같은 현상을 의도적으로 관찰할 수 있도록 구성하였다. 또한 두 렌더링 경로가 동일한 카메라, 기하, 재질, 면광원 및 Cook-Torrance 기반 BRDF를 공유하도록 하여, 결과 차이가 가능한 한 가시성 및 radiance 질의 방식의 차이에서 발생하도록 설계하였다.
+
+연구는 Microsoft의 D3D12 Raytracing MiniEngine Sample 구조 분석에서 시작하여 Cornell 스타일 실험 환경 구축, shadow map과 shadow ray 비교, PCSS와 면광원 샘플링 비교, 공통 PBR 조명 모델 도입, SSR과 reflection ray 비교, prefiltered environment map과 GGX importance-sampled glossy reflection 비교, 환경맵 기반 간접광과 재귀 깊이를 제어할 수 있는 diffuse path tracing 비교 순서로 진행된다. 각 단계에서는 렌더링 결과의 현상적 차이뿐 아니라, 필요한 장면 정보의 범위, 좌표 공간 변환, depth bias와 ray epsilon, 재귀 깊이, 샘플링 분산, 리소스 상태 및 셰이더 데이터 정합성 등 파이프라인 수준의 원인을 함께 분석한다.
+
+본 연구의 결과물은 생산 환경의 절대 성능을 대표하는 벤치마크가 아니라, 래스터 근사 기법이 실패하는 조건과 레이 트레이싱이 이를 해결하는 원리를 엔진 수준에서 재현하고 분석하기 위한 교육적·실험적 프레임워크이다. 이를 바탕으로 향후에는 래스터라이제이션을 기본 가시성 경로로 유지하면서, 화면 공간 정보가 불충분하거나 높은 정확도가 필요한 효과에 선택적으로 레이 질의를 적용하는 혼합 렌더러로 확장하고자 한다.
+
+**핵심어:** Rasterization, Ray Tracing, DirectX Raytracing, Hybrid Rendering, Shadow Map, PCSS, SSR, PBR, Glossy Reflection, Global Illumination
+
+---
+
+# 1. 서론
+
+## 1.1 연구 배경
+
+실시간 렌더링에서 래스터라이제이션은 오랜 기간 표준적인 가시성 결정 방식으로 사용되어 왔다. 래스터라이저는 삼각형을 화면 공간으로 투영한 뒤, 픽셀 단위의 depth test와 shading을 수행함으로써 높은 처리량을 제공한다. 그러나 이 구조는 기본적으로 현재 카메라에서 보이는 표면을 중심으로 동작한다. 그림자, 반사, 굴절, 간접광처럼 다른 위치 또는 방향에서 장면의 가시성을 확인해야 하는 효과는 기본 래스터 파이프라인만으로 직접 계산하기 어렵다.
+
+이를 보완하기 위해 실시간 그래픽스에서는 다양한 근사 기법이 발전하였다. Shadow map은 광원 시점의 depth buffer를 이용하여 그림자를 판정하고, screen-space reflection(SSR)은 현재 프레임의 color 및 depth buffer를 이용하여 반사를 추정한다. Prefiltered environment map은 방향별 조명 정보를 미리 필터링하여 거친 표면 반사를 근사하며, lightmap과 probe는 간접광을 사전 계산하거나 제한된 위치에 저장한다. 이러한 기법은 높은 효율을 제공하지만, 사용하는 데이터의 해상도, 투영 범위, 화면 포함 여부, 사전 계산 조건에 의해 구조적인 오차가 발생한다.
+
+DirectX Raytracing(DXR)은 가속 구조를 대상으로 광선을 추적할 수 있는 파이프라인을 제공한다. Shadow ray는 표면과 광원 사이의 실제 차폐 여부를 검사하고, reflection ray는 화면 밖을 포함한 반사 방향의 장면을 탐색하며, diffuse secondary ray는 간접광을 추정할 수 있다. 따라서 레이 트레이싱은 래스터 근사 기법의 정보 부족 문제를 완화할 수 있다. 그러나 광선 순회 비용, 샘플 수에 따른 성능 증가, 확률적 노이즈, denoising 및 기존 엔진과의 데이터 정합성 문제를 새롭게 발생시킨다.
+
+현대 실시간 렌더러는 두 기술 중 하나만을 선택하기보다, 래스터라이제이션의 처리량과 레이 트레이싱의 정확한 장면 질의를 결합하는 방향으로 발전하고 있다. 그러므로 중요한 질문은 “어느 기술이 더 우수한가”가 아니라, “특정 효과에서 래스터 근사가 어떤 정보를 사용하며 어디에서 실패하는가”, “레이 질의는 무엇을 다르게 계산하여 그 문제를 해결하는가”, 그리고 “두 방식을 하나의 엔진에서 어떻게 일관되게 연결할 수 있는가”이다.
+
+## 1.2 문제 정의
+
+래스터라이제이션과 레이 트레이싱의 장단점은 이미 널리 알려져 있다. 단순히 두 방식의 결과 이미지나 프레임 시간을 비교하는 연구는 다음과 같은 한계를 가진다.
+
+첫째, 서로 다른 렌더러의 결과를 비교할 경우 장면, 재질, 조명 모델, 후처리 및 최적화 수준이 달라 결과 차이의 원인을 분리하기 어렵다. 둘째, 복잡한 게임 장면에서의 성능 수치는 실제 응용에는 유용하지만, 특정 artifact가 발생한 파이프라인 원인을 추적하기 어렵다. 셋째, 레이 트레이싱의 절대 성능은 장면 복잡도, 가속 구조, 하드웨어 및 샘플 수에 크게 의존하므로 단순 장면에서 얻은 수치를 일반화하기 어렵다.
+
+본 연구는 이러한 한계를 인정하고 연구 목표를 다르게 설정한다. 동일 엔진 내부에서 동일한 장면과 shading 조건을 유지한 채, 하나의 시각 효과를 래스터 근사 방식과 레이 질의 방식으로 각각 구현한다. 이후 근사 방식의 실패 조건을 의도적으로 재현하고, 결과 이미지와 파이프라인 데이터를 함께 분석한다. 즉, 본 연구에서 단순한 Cornell 스타일 장면은 생산 환경을 대표하기 위한 축소판이 아니라, 변수를 통제하고 원인과 결과를 명확히 연결하기 위한 진단용 실험 장치이다.
+
+## 1.3 연구 질문
+
+본 연구는 다음 질문에 답하고자 한다.
+
+1. Shadow map, PCSS, SSR, prefiltered environment map 및 환경맵 기반 간접광은 각각 어떤 제한된 정보를 사용하며, 어떤 조건에서 구조적으로 실패하는가?
+2. 대응하는 shadow ray, area light sampling, reflection ray, GGX importance sampling 및 diffuse secondary ray는 어떤 월드 공간 질의를 수행하여 근사 기법의 한계를 완화하는가?
+3. 동일 엔진에서 두 경로를 공정하게 비교하기 위해 어떤 기하, 재질, 조명 및 상수 데이터를 공유해야 하는가?
+4. 레이 트레이싱 통합 과정에서 발생하는 bias, epsilon, 좌표계, winding, normal, recursion, resource state 및 temporal sampling 문제는 결과에 어떤 영향을 주는가?
+5. 각 비교 결과로부터 어떤 조건에서 래스터 근사를 유지하고, 어떤 조건에서 선택적으로 레이 질의를 사용하는 혼합 렌더러 설계 원칙을 도출할 수 있는가?
+
+## 1.4 연구 가설
+
+본 연구는 다음 세 가지 가설을 중심으로 실험을 구성한다.
+
+**가설 1.** 래스터 근사 기법의 대표적인 artifact는 단순한 파라미터 조정 실패가 아니라, 효과 계산에 필요한 월드 공간 정보가 shadow map, screen buffer 또는 environment map에 포함되지 않을 때 발생한다. 해상도와 filter 조정은 artifact를 완화할 수 있지만, 표현에서 제거된 정보를 복원할 수는 없다.
+
+**가설 2.** 레이 트레이싱은 가속 구조에 대한 월드 공간 질의를 통해 래스터 근사의 구조적인 정보 누락을 줄일 수 있다. 그러나 오차가 완전히 사라지는 것이 아니라, 유한 sample의 분산, ray epsilon, recursion 제한 및 temporal accumulation 문제로 이동한다.
+
+**가설 3.** Raster와 RT 경로가 동일한 장면, 재질, 광원 및 BRDF를 공유하는 비교 프레임워크를 구축하면 결과 차이의 원인을 정보 표현과 질의 방식의 차이로 추적할 수 있다. 이 분석은 효과별로 적절한 방식을 선택하는 혼합 렌더러의 설계 기준으로 연결될 수 있다.
+
+## 1.5 연구 목표
+
+본 연구의 1차 목표는 래스터라이제이션과 레이 트레이싱의 절대적 우열을 제시하는 것이 아니다. 목표는 두 방식의 차이를 “최종 이미지 생성 방식”이 아니라 “필요한 장면 정보를 질의하는 방식”의 차이로 해석하는 것이다.
+
+래스터 근사 기법은 월드 공간의 복잡한 질의를 제한된 표현으로 변환한다. Shadow map은 광원 시점의 2차원 depth texture로, SSR은 현재 화면의 color/depth buffer로, environment map은 위치 정보를 제거한 방향별 radiance로 장면을 축약한다. 이 축약은 효율의 근원이지만, 동시에 정보 손실의 원인이 된다.
+
+레이 트레이싱은 동일한 질문을 가속 구조에 대한 월드 공간 광선 질의로 수행한다. 이는 투영 범위나 화면 포함 여부에 의한 정보 손실을 줄이지만, 광선 수와 재귀 깊이, 확률적 샘플링 분산 및 엔진 통합 비용을 요구한다.
+
+따라서 본 연구의 목표는 다음과 같다.
+
+- 래스터 근사 기법의 실패 현상을 재현 가능한 장면과 카메라 프리셋으로 구성한다.
+- 동일 효과에 대응하는 DXR 기반 질의를 구현한다.
+- 두 경로가 가능한 한 동일한 BRDF, 재질, 광원 및 장면 데이터를 사용하도록 정합성을 확보한다.
+- 결과 차이의 현상적 설명과 파이프라인 수준의 원인을 연결한다.
+- 향후 혼합 렌더러를 설계하기 위한 기술 선택 기준을 도출한다.
+
+## 1.6 연구 범위와 제한
+
+본 연구는 Microsoft D3D12 Raytracing MiniEngine Sample을 기반으로 구현한다. 실험 장면은 Cornell Box의 구조를 참고한 폐쇄형 공간, 면광원, 색상이 다른 벽, 두 개의 박스 및 세부 형상을 가진 helmet 모델로 구성한다. 장면은 그림자, 반사, 다중 반사, 거친 표면 반사 및 색 번짐을 관찰하기에 충분하지만, 실제 게임 장면의 기하 복잡도와 동적 오브젝트 수를 대표하지 않는다.
+
+또한 본 연구의 BRDF는 metallic-roughness 재질과 Cook-Torrance 구조를 사용하지만, diffuse 항의 정규화와 environment BRDF LUT 등 일부 요소는 실험 목적에 맞게 단순화되어 있다. RT glossy reflection과 diffuse GI는 제한된 샘플 수 및 TAA 누적을 사용하며, 완전한 production denoiser는 포함하지 않는다.
+
+따라서 본 연구는 단순 장면에서 측정한 GPU 시간을 성능 결론으로 제시하지 않으며, 레이 트레이싱의 절대적 성능 overhead 또는 실제 게임 엔진의 최종 품질을 대표한다고 주장하지 않는다. 대신 sample 수, 재귀 깊이 및 추가 파이프라인 단계가 만드는 계산 복잡도의 차이를 설명한다.
+
+## 1.7 연구 기여
+
+본 연구의 기여는 다음과 같다.
+
+1. 하나의 MiniEngine 기반 실행 파일에서 래스터 근사 방식과 대응하는 RT 방식을 즉시 전환하여 비교할 수 있는 단계적 실험 프레임워크를 구축하였다.
+2. Cornell 스타일 장면과 artifact 관찰용 카메라 프리셋을 사용하여 screen edge, off-screen missing, depth discontinuity, shadow bias, PCSS over-blur 및 다중 반사와 같은 실패 조건을 재현하였다.
+3. Raster 및 RT 경로가 공통 Cook-Torrance BRDF, 재질 속성, 면광원 및 장면 기하를 공유하도록 구성하여 비교 시 shading 모델 차이를 줄였다.
+4. 각 근사 기법의 정보 제한과 대응 RT 질의를 파이프라인 수준에서 연결하고, 구현 과정에서 발생한 버그를 좌표계, 가시성, 샘플링 및 리소스 관리 관점으로 분류하였다.
+5. 비교 결과를 바탕으로 향후 혼합 렌더러가 레이 질의를 선택적으로 적용할 수 있는 설계 방향을 제안한다.
+
+본 연구는 새로운 shadow, reflection 또는 GI 알고리즘 자체의 발명을 주장하지 않는다. 기여의 중심은 기존 기법들을 하나의 엔진과 통제 장면 안에서 대응 관계로 재구성하고, 결과 artifact와 내부 파이프라인 원인을 연결하여 분석할 수 있는 비교 방법론 및 구현 프레임워크에 있다.
+
+## 1.8 논문 구성
+
+2장에서는 래스터라이제이션, DXR 파이프라인, 가시성 질의, BRDF 및 혼합 렌더링 관련 이론을 설명한다. 3장에서는 연구에 사용한 엔진 구조, Cornell 스타일 장면, 비교 조건 및 평가 방법을 제시한다. 4장에서는 Phase 0부터 Phase 7까지의 구현과 실험을 순서대로 설명한다. 5장에서는 단계별 결과를 정보 표현, 오차, 비용 및 엔진 통합 문제 관점에서 종합한다. 6장에서는 연구의 한계와 혼합 렌더러 확장 방향을 논의하고, 7장에서 결론을 제시한다.
+
+---
+
+# 2. 관련 기술 및 이론
+
+## 2.1 래스터라이제이션 파이프라인
+
+래스터라이제이션은 정점 셰이더에서 기하를 clip space로 변환하고, 삼각형을 화면의 fragment로 변환한 뒤, depth test와 pixel shading을 수행한다. 이 방식은 화면에 투영되는 삼각형을 높은 병렬성으로 처리한다. 그러나 pixel shader가 기본적으로 접근하는 정보는 현재 fragment의 속성과 바인딩된 texture 및 buffer로 제한된다.
+
+그림자나 반사를 계산하기 위해서는 현재 표면에서 다른 방향으로 장면을 다시 질의해야 한다. 래스터 파이프라인은 이를 직접 제공하지 않으므로, 별도의 pass를 통해 필요한 정보를 texture로 저장하거나 현재 화면의 buffer를 재사용한다. 결과적으로 래스터 기반 효과의 정확도는 저장된 정보의 해상도, 투영 방식, 갱신 주기 및 포함 범위에 의존한다.
+
+## 2.2 레이 트레이싱 파이프라인
+
+DXR은 bottom-level acceleration structure(BLAS)와 top-level acceleration structure(TLAS)를 사용하여 장면 기하에 대한 광선 교차 검사를 가속한다. Ray generation shader는 광선의 origin과 direction을 생성하고, traversal 과정에서 교차 후보를 탐색한다. Closest-hit shader는 가장 가까운 교차점의 shading을 수행하며, miss shader는 광선이 장면과 교차하지 않았을 때의 결과를 결정한다.
+
+Shadow ray는 표면에서 광원 방향으로 광선을 발사하여 광원보다 가까운 교차점이 존재하는지 확인한다. Reflection ray는 반사 방향으로 새로운 광선을 발사하며, diffuse secondary ray는 반구 방향을 샘플링하여 간접광을 추정한다. 이러한 질의는 현재 화면에 포함되지 않은 기하에도 접근할 수 있다.
+
+## 2.3 가시성 질의와 정보 표현
+
+본 연구에서는 래스터 근사와 레이 트레이싱의 차이를 다음과 같은 정보 표현의 차이로 정의한다.
+
+| 효과 | 래스터 근사가 사용하는 정보 | 정보 손실 또는 제약 | 대응 RT 질의 |
+|---|---|---|---|
+| Hard Shadow | 광원 시점 depth map | 해상도, bias, 투영 범위 | 표면-광원 구간 교차 검사 |
+| Soft Shadow | 단일 shadow map의 blocker 및 filter 추정 | 실제 광원 면적별 가시성 부재 | 면광원 위 여러 점으로 shadow ray |
+| Reflection | 현재 화면 color/depth | off-screen 및 가려진 기하 부재 | 반사 방향 closest-hit |
+| Glossy Reflection | 방향별 prefiltered environment map | 위치 및 국소 차폐 정보 부재 | GGX 분포 기반 반사 광선 |
+| Indirect Lighting | lightmap/probe/environment irradiance | 위치 해상도, 동적 변화, 방향 정보 제한 | diffuse secondary ray |
+
+이 표에서 공통적으로 확인할 수 있는 점은 래스터 근사가 월드 공간 질의를 더 작은 데이터 표현으로 축약한다는 것이다. RT는 축약된 texture를 조회하는 대신 광선을 통해 장면에 직접 질문한다.
+
+## 2.4 Shadow Map과 Shadow Ray
+
+Shadow map은 광원 관점에서 장면을 렌더링하여 가장 가까운 depth를 저장한다. 카메라 pass의 표면 위치를 shadow space로 변환하고 저장된 depth와 비교하여 그림자 여부를 판정한다. 이때 동일 표면의 수치 오차로 발생하는 shadow acne를 줄이기 위해 depth bias 또는 slope-scaled depth bias를 사용한다. Bias가 작으면 acne가 발생하고, 크면 물체와 그림자가 분리되는 peter-panning이 발생한다.
+
+Shadow ray는 표면에서 광원까지의 구간에 다른 기하가 존재하는지 직접 검사한다. Shadow map의 texel 해상도나 광원 투영 범위에는 의존하지 않지만, ray origin이 자기 자신과 다시 교차하지 않도록 작은 epsilon을 적용해야 한다. 따라서 shadow map의 depth bias와 shadow ray의 origin epsilon은 목적이 유사하지만 서로 다른 공간과 단위에서 동작하는 수치 안정화 장치이다.
+
+## 2.5 PCSS와 면광원 샘플링
+
+Percentage-Closer Soft Shadows(PCSS)는 shadow map에서 blocker를 탐색하고, receiver와 blocker 거리 차이를 이용하여 penumbra 크기를 추정한 뒤, 가변 반경 PCF를 적용한다. PCSS는 단일 shadow map으로 접촉부에서 날카롭고 멀어질수록 부드러운 그림자를 생성할 수 있다. 그러나 실제 면광원의 각 위치에 대한 가시성을 계산하지 않으므로 blocker 탐색 실패, 과도한 filter radius 및 shadow map 투영 오차의 영향을 받는다.
+
+RT 기반 면광원 그림자는 광원 면적 위 여러 점을 샘플링하고 각 점까지 shadow ray를 발사한다. 가시성 평균은 광원 면적 중 보이는 비율을 근사하며, 실제 차폐 관계에서 penumbra가 형성된다. 샘플 수가 적으면 noise 또는 grid pattern이 발생하고, 샘플 수가 많으면 비용이 증가한다.
+
+## 2.6 Screen-Space Reflection과 Reflection Ray
+
+SSR은 현재 프레임의 depth buffer를 따라 반사 ray를 march하고, 추정된 교차 위치에서 화면 color를 조회한다. 이미 생성된 화면 buffer를 사용하므로 효율적이지만, 화면 밖의 물체, 다른 물체 뒤에 가려진 표면 및 depth buffer에 표현되지 않은 뒷면은 반사할 수 없다. 또한 depth buffer가 표면의 전면 깊이만 저장하기 때문에 얇은 물체, 깊이 불연속 및 grazing angle에서 오차가 증가한다.
+
+Reflection ray는 월드 공간 반사 방향으로 TLAS를 질의하여 가장 가까운 표면을 찾는다. 화면 밖 기하와 가려진 기하를 반사할 수 있으며, 재귀 깊이를 늘려 mirror-in-mirror 효과를 표현할 수 있다. 반면 재귀 깊이에 따라 ray 수와 shading 호출이 증가하고, payload와 RTPSO recursion 설정을 일관되게 관리해야 한다.
+
+## 2.7 Cook-Torrance BRDF와 공통 Shading 기준
+
+본 연구는 Raster 및 RT 경로에서 공통으로 사용할 수 있도록 metallic-roughness 기반 Cook-Torrance BRDF를 구성한다. Specular 항은 GGX normal distribution, Smith geometry term 및 Fresnel-Schlick 근사를 사용한다. Diffuse 재질은 base color에 주로 기여하고, metallic 재질은 base color를 specular reflectance로 사용한다.
+
+공통 BRDF 도입은 독립적인 품질 개선 단계이면서, 이후 비교 실험의 통제 조건이기도 하다. Raster와 RT가 서로 다른 조명 모델을 사용하면 그림자 또는 반사 방식의 차이와 BRDF 차이를 구분하기 어렵다. 따라서 Phase 4 이후의 비교에서는 가능한 한 동일한 재질 파라미터와 `EvaluatePBR` 함수를 공유한다.
+
+## 2.8 Glossy Reflection과 Importance Sampling
+
+거친 금속 표면의 반사는 완전한 mirror direction 하나가 아니라 microfacet 분포에 의해 여러 방향으로 퍼진다. Raster 기반 방식에서는 environment cubemap을 roughness에 따라 서로 다른 mip level로 prefilter하여 이 적분을 근사할 수 있다. 이 방식은 실행 시 texture lookup만 필요하지만, environment capture 위치와 다른 지점에서 발생하는 parallax, 국소 차폐 및 동적 변화에 취약하다.
+
+RT 방식에서는 GGX 분포를 importance sampling하여 반사 방향을 생성할 수 있다. 각 프레임의 샘플은 noisy하지만, 시간 누적과 denoising을 통해 수렴시킬 수 있다. 이 방식은 현재 위치의 실제 가시성을 반영하지만, 샘플 분산과 temporal stability 문제가 발생한다.
+
+## 2.9 Global Illumination
+
+간접광은 직접광을 받은 표면에서 반사된 빛이 다른 표면에 도달하는 현상이다. Raster 기반 실시간 렌더러는 lightmap, irradiance probe, voxel, screen-space GI 또는 environment irradiance 등의 근사 방식을 사용한다. 본 연구의 raster baseline은 prefiltered environment cubemap의 낮은 주파수 정보를 surface normal 방향으로 조회하여 diffuse irradiance를 근사한다.
+
+RT 기반 baseline은 diffuse 표면에서 cosine-weighted hemisphere 방향으로 secondary ray를 발사하고, 교차한 표면의 radiance를 현재 표면의 base color와 결합한다. 본 구현은 재귀 깊이를 제어하여 1-bounce와 2-bounce 결과를 비교할 수 있다. 낮은 sample count에서도 색 번짐과 위치별 차폐를 관찰할 수 있지만, noise를 완화하기 위한 시간 누적이 필요하다.
+
+## 2.10 혼합 렌더링
+
+혼합 렌더링은 래스터라이제이션을 기본적인 primary visibility 및 G-buffer 생성에 사용하고, 그림자, 반사 또는 간접광 중 필요한 일부 질의에 RT를 적용한다. 이 구조에서 중요한 것은 RT를 단순히 활성화하는 것이 아니라, 래스터 데이터가 충분한 경우와 부족한 경우를 구분하는 것이다.
+
+본 연구에서는 이를 “정보 충분성” 관점으로 해석한다. 현재 화면이나 사전 계산 texture가 필요한 정보를 충분히 포함하면 래스터 근사가 효율적이다. 반대로 off-screen 기하, 복잡한 차폐, 위치 종속 반사 또는 동적 간접광이 필요한 경우 월드 공간 ray query의 가치가 증가한다.
+
+---
+
+# 3. 연구 방법 및 실험 프레임워크
+
+## 3.1 기반 엔진
+
+본 연구는 Microsoft DirectX-Graphics-Samples 저장소의 D3D12 Raytracing MiniEngine Sample에서 시작하였다. 원본 샘플은 MiniEngine Model Viewer에 DXR을 연결하고, primary ray, barycentric 시각화, shadow ray 및 reflection ray의 기초 사용 방법을 제공한다.
+
+연구 과정에서는 원본 샘플의 렌더링 모드, root signature, shader table, acceleration structure 생성, raster pass 및 post effect 구조를 분석한 뒤, 비교 실험에 필요한 Cornell 스타일 장면과 공통 shading 경로를 추가하였다. 또한 실행 중 단축키로 Raster, Raster Shadow, Raster SSR, RT, RT Shadow, 재귀 반사, Raster Glossy, RT Glossy, Raster GI 및 RT GI 모드를 전환할 수 있도록 확장하였다.
+
+원본 샘플의 README와 현재 구현 사이에는 기능 차이가 있으므로, 최종 논문에서는 수정된 모드 표와 실행 조건을 별도 표로 제시한다.
+
+## 3.2 Cornell 스타일 진단 장면
+
+실험 장면은 Cornell Box의 대표적 구성을 참고하였다. 장면은 색상이 다른 좌우 벽, 흰색 후면 벽, 바닥, 천장, 면광원, 두 개의 박스 및 helmet 모델로 구성된다. 두 박스는 그림자 차폐 및 반사 실험에 사용되며, 일부 모드에서는 metallic 또는 diffuse 재질로 전환된다.
+
+Cornell Box를 선택한 이유는 다음과 같다.
+
+- 평면 벽과 바닥은 그림자 경계, seam, bias 및 color bleeding을 관찰하기 쉽다.
+- 제한된 공간은 면광원과 차폐물의 상대적 위치를 통제하기 쉽다.
+- 색상이 다른 벽은 간접광의 색 번짐을 명확히 드러낸다.
+- 거울 박스와 helmet은 단일 반사 및 다중 반사 경로를 구성할 수 있다.
+- 장면 복잡도가 낮아 pipeline bug와 알고리즘 artifact를 구분하기 쉽다.
+
+이 장면은 생산 환경 성능 측정을 위한 benchmark가 아니라, 렌더링 현상의 원인을 분리하기 위한 diagnostic scene으로 사용한다.
+
+## 3.3 공정한 비교를 위한 통제 조건
+
+두 경로의 비교에서 다음 조건을 가능한 한 동일하게 유지한다.
+
+1. 동일한 기하와 world transform을 사용한다.
+2. 동일한 카메라 위치, 방향, FOV 및 출력 해상도를 사용한다.
+3. 동일한 면광원 위치, 크기, 색상 및 세기를 사용한다.
+4. 동일한 material ID, base color, metallic, roughness 및 AO를 사용한다.
+5. 직접광 계산에 공통 Cook-Torrance BRDF 함수를 사용한다.
+6. shadow 또는 reflection 방식 외의 후처리 조건을 동일하게 유지한다.
+7. artifact 관찰용 카메라 프리셋을 고정하여 반복 촬영이 가능하도록 한다.
+
+완전한 동일 조건을 유지하기 어려운 경우에는 차이를 명시한다. 예를 들어 Raster 면광원 직접광은 제한된 대표 점을 사용하고, RT 면광원 그림자는 64개 광원 위치를 사용한다. 이러한 차이는 결과 해석 시 알고리즘 구성의 일부로 기록한다.
+
+## 3.4 비교 프레임워크의 모드
+
+현재 구현의 주요 비교 모드는 다음과 같다.
+
+| 모드 | 목적 |
+|---|---|
+| Raster | 그림자 없는 raster baseline |
+| Raster Shadow | Raster shading + shadow map/PCSS |
+| Raster SSR | Raster shading + shadow map + SSR |
+| RT | Primary ray shading + shadow map |
+| RT Shadow | Primary ray shading + area-light shadow rays |
+| RT Reflection Depth 1/2/4 | 재귀 깊이에 따른 반사 비교 |
+| Raster Glossy | GGX prefiltered environment map |
+| RT Glossy | GGX importance-sampled reflection ray |
+| Raster GI | Environment irradiance 기반 diffuse GI 근사 |
+| RT GI | Cosine-weighted diffuse secondary ray, 1/2-bounce depth control |
+
+이 구조는 효과별 비교뿐 아니라 혼합 조합을 분석할 수 있게 한다. 예를 들어 primary visibility는 RT를 사용하면서 그림자는 shadow map으로 계산하는 모드를 통해, primary ray와 shadow ray의 영향을 분리할 수 있다.
+
+## 3.5 평가 관점
+
+본 연구의 평가는 정량 성능 하나가 아니라 다음 네 관점을 함께 사용한다.
+
+### 3.5.1 현상적 품질
+
+- 그림자 경계의 aliasing, over-blur 및 contact loss
+- SSR의 screen-edge cutoff, off-screen missing 및 depth discontinuity
+- reflection depth에 따른 누락
+- glossy reflection의 공간 정확도 및 noise
+- GI의 color bleeding 및 위치 종속성
+
+### 3.5.2 파이프라인 원인
+
+- 어떤 buffer 또는 acceleration structure를 질의하는가?
+- 질의가 어느 좌표 공간에서 수행되는가?
+- 필요한 정보가 표현에 포함되어 있는가?
+- 오류가 해상도, bias, sampling, recursion 또는 데이터 정합성 중 어디에서 발생하는가?
+
+### 3.5.3 실험 설정 및 계산 복잡도
+
+- shadow/reflection/GI ray 수
+- shadow map 해상도 및 PCSS sample count
+- RT sample count와 recursion depth
+- temporal accumulation에 필요한 frame 수
+- 각 효과가 요구하는 pass, buffer, acceleration structure 및 shader 단계
+
+본 연구는 단순화된 진단 장면을 사용하므로 측정된 GPU 시간이 실제 게임 장면의 절대 성능 오버헤드를 대표하기 어렵다. 따라서 GPU frame time의 우열 비교는 평가 범위에서 제외하고, 각 방식에서 추가되는 질의 수, 재귀 깊이, 샘플 수 및 파이프라인 구성의 차이를 계산 복잡도의 지표로 사용한다.
+
+### 3.5.4 구현 복잡성
+
+- 추가 리소스와 descriptor
+- BLAS/TLAS 및 shader table 구성
+- raster/RT 재질 데이터 동기화
+- resource state transition
+- 디버깅 난이도와 발생한 버그 유형
+
+## 3.6 재현 가능한 관찰 실험 계획
+
+본 연구는 절대 성능 벤치마크보다 근사 기법의 실패 조건과 그 파이프라인 원인을 재현하는 데 초점을 둔다. 각 실험은 다음 절차로 수행한다.
+
+1. 출력 해상도, 카메라, 장면 기하, 재질 및 광원 조건을 고정한다.
+2. 비교하려는 한 가지 독립 변수만 변경하고 동일 구도의 결과 이미지를 기록한다.
+3. 화면에 나타난 artifact의 위치와 형태를 관찰하고, 사용된 buffer 또는 ray query의 정보 범위와 연결한다.
+4. RT 확률적 효과는 동일한 정적 카메라에서 TAA 누적 전후를 함께 관찰하여 noise와 수렴 경향을 구분한다.
+5. 각 Phase의 결과를 ‘관찰 현상, 파이프라인 원인, 대응 방식의 차이, 결론’ 형식으로 정리한다.
+
+권장 실험 변수는 다음과 같다.
+
+| 실험 | 독립 변수 | 관찰 항목 |
+|---|---|---|
+| Shadow Map | 512, 1024, 2048 해상도 / bias | aliasing, acne, peter-panning |
+| PCSS | blocker/filter sample, max radius | penumbra, over-blur |
+| Shadow Ray | 1, 4, 16, 64 rays | noise/grid pattern, contact shadow |
+| Reflection | depth 0, 1, 2, 4 | 반사 누락, 재귀 깊이에 따른 표현 범위 |
+| Glossy | roughness, frame accumulation | blur 정확도, noise, 수렴 |
+| GI | bounce 1/2, 누적 frame | color bleeding, 위치별 차폐, noise, 수렴 |
+
+---
+
+# 4. 단계별 구현 및 비교 실험
+
+## 4.1 Phase 0. Legacy Analysis: DXR Sample 구조 분석
+
+### 4.1.1 목표
+
+Phase 0의 목표는 기존 MiniEngine과 DXR sample의 렌더링 흐름을 이해하고, 이후 비교 실험을 추가할 수 있는 변경 지점을 식별하는 것이다. 분석 대상은 raster scene pass, depth/shadow pass, post effect, raytracing state object, acceleration structure, shader table, root signature 및 constant buffer 전달 경로이다.
+
+### 4.1.2 주요 분석 내용
+
+Raster 경로는 scene geometry를 vertex/pixel shader로 렌더링하고, depth 및 color target을 후속 pass에서 사용한다. DXR 경로는 동일 모델의 vertex/index buffer를 BLAS에 등록하고, instance transform을 포함한 TLAS를 구성한다. Ray generation shader는 camera ray를 생성하고, closest-hit shader는 material 및 texture를 읽어 shading을 수행한다.
+
+이 과정에서 Raster와 DXR은 동일 장면을 사용하더라도 데이터 접근 방식이 다르다는 점을 확인하였다. Raster는 draw call과 root parameter를 중심으로 material state를 전달하지만, DXR은 shader record, geometry index, instance 및 hit group을 통해 데이터를 연결한다. 따라서 두 경로의 비교를 위해서는 geometry/material ID와 transform의 정합성을 명시적으로 유지해야 한다.
+
+### 4.1.3 학습 및 발생 문제
+
+Phase 0에서 확인한 대표적인 통합 문제는 다음과 같다.
+
+- MiniEngine matrix와 DXR instance transform의 행·열 우선 표현 차이
+- BLAS geometry 순서와 hit shader material ID 연결
+- raster vertex normal과 RT procedural normal 불일치
+- root signature의 descriptor register 및 resource binding 정합성
+- shader payload 크기와 recursion depth 설정
+- UAV/SRV 사용 전 resource state transition
+
+이 단계는 이후 실험의 기반이며, 최종 결과 이미지보다 엔진 데이터 흐름을 이해하는 데 의미가 있다.
+
+## 4.2 Phase 1. Experimental Environment: Cornell Style Scene 구축
+
+### 4.2.1 목표
+
+Phase 1의 목표는 래스터 근사의 실패 조건과 RT 질의의 차이를 반복적으로 관찰할 수 있는 통제 장면을 구축하는 것이다.
+
+### 4.2.2 구현
+
+기존 sample scene에 procedural surface를 추가하여 바닥, 좌우 벽, 후면 벽, 천장, 면광원 및 박스를 구성하였다. Raster 경로는 vertex/index buffer와 procedural material ID를 사용하고, RT 경로는 동일 geometry를 acceleration structure에 등록한다. Helmet 모델은 복잡한 형상과 texture material을 대표하며, 박스는 shadow 및 reflection 경로를 명확히 구성하기 위해 사용한다.
+
+카메라 프리셋은 단순한 구도 저장 기능을 넘어 artifact 재현 장치로 구성하였다. 정면 비교, 그림자 접촉부, SSR screen edge, off-screen object, depth discontinuity, reflection depth, glossy reflection 및 GI color bleeding을 관찰하는 위치를 제공한다.
+
+### 4.2.3 발생 문제와 해결
+
+장면 구축 과정에서 Raster와 RT 결과의 seam, 벽-바닥 접촉부 누락 및 면 방향 차이가 발생하였다. 원인은 기하 범위가 정확히 맞닿을 때 발생하는 부동소수점 오차, shadow/ray epsilon, winding order 및 back-face culling 차이였다. 바닥 범위 확장, 벽과 박스의 미세한 하향 이동, raster/RT normal 동기화 및 적절한 bias 조정을 통해 문제를 완화하였다.
+
+이 경험은 동일한 수학적 장면을 정의하는 것만으로 두 pipeline의 결과가 자동으로 일치하지 않으며, 각 pipeline이 사용하는 가시성 규칙과 수치 오차를 함께 관리해야 함을 보여준다.
+
+## 4.3 Phase 2. Visibility/Shadow: Shadow Map vs Shadow Ray
+
+### 4.3.1 실험 목적
+
+Phase 2에서는 한 표면이 광원에서 보이는지를 판정하는 가장 기본적인 visibility 문제를 비교한다. Raster 방식은 shadow map을 사용하고, RT 방식은 shadow ray를 사용한다.
+
+### 4.3.2 Shadow Map 경로
+
+Shadow map 경로는 광원 시점에서 장면 depth를 생성하고, camera pass에서 world position을 light shadow space로 변환하여 저장된 depth와 비교한다. 이 방식은 한 번 생성한 shadow map을 많은 pixel이 재사용하므로 효율적이다.
+
+그러나 shadow map은 광원 공간의 제한된 texel로 장면을 표현한다. 해상도가 낮으면 그림자 경계가 계단 형태로 나타나며, 해상도가 높아져도 perspective/projective aliasing과 bias 문제는 남는다. Depth bias가 부족하면 자기 그림자에 의한 acne가 발생하고, 과도하면 접촉부의 그림자가 사라지거나 물체에서 분리된다.
+
+### 4.3.3 Shadow Ray 경로
+
+Shadow ray 경로는 primary hit point에서 광원 위치까지 광선을 발사한다. 광원까지의 거리보다 가까운 교차점이 존재하면 그림자, 존재하지 않으면 조명으로 판정한다. Shadow map과 달리 texture resolution에 의해 경계가 양자화되지 않으며, 광원 투영 범위를 별도로 정의할 필요가 없다.
+
+RT에서도 자기 교차를 방지하기 위한 ray origin epsilon이 필요하다. Epsilon이 너무 크면 벽과 바닥 또는 물체 접촉부에 빛이 새는 흰 선이 발생할 수 있고, 너무 작으면 자기 교차가 발생한다. 이는 shadow map의 bias 문제와 유사하지만, RT에서는 world-space 거리로 제어된다는 차이가 있다.
+
+### 4.3.4 비교 결과 해석
+
+Shadow map의 오차는 “광원 시점 depth texture가 실제 visibility를 충분히 표현하지 못하는 것”에서 발생한다. Shadow ray는 visibility를 직접 질의하여 해상도 의존성을 제거하지만, ray epsilon과 traversal 비용을 추가한다.
+
+이 단계에서 중요한 결론은 RT가 bias 문제를 완전히 제거하는 것이 아니라는 점이다. 두 방식 모두 수치적 자기 교차를 회피해야 하며, 차이는 bias가 적용되는 표현과 공간에 있다.
+
+### 4.3.5 결과 작성용 문장
+
+> Shadow map은 제한된 광원 공간 depth texture를 재사용함으로써 높은 효율을 제공하였으나, 해상도와 depth bias에 따라 경계 aliasing 및 접촉부 분리 현상이 발생하였다. Shadow ray는 표면과 광원 사이의 실제 교차 여부를 검사하여 이러한 texture-space 오차를 줄였으나, ray origin epsilon 설정에 따라 접촉부 light leak가 발생할 수 있었다.
+
+## 4.4 Phase 3. Visibility(area)/Soft Shadow: PCSS vs Area Light Sampling
+
+### 4.4.1 실험 목적
+
+Phase 3에서는 면광원에 의해 생성되는 soft shadow를 비교한다. Raster 경로는 PCSS를 사용하고, RT 경로는 면광원 위의 여러 위치로 shadow ray를 발사한다.
+
+### 4.4.2 PCSS 구현
+
+현재 PCSS 구현은 8×8 고정 grid를 disk 형태로 변환하여 blocker search와 filtering에 각각 사용한다. 먼저 shadow map에서 receiver보다 광원에 가까운 blocker를 탐색하고 평균 blocker 거리를 계산한다. 이후 receiver와 blocker 거리 차이로 penumbra ratio를 추정하고, 제한된 filter radius로 percentage-closer filtering을 수행한다.
+
+PCSS는 단일 shadow map만으로 접촉부에서 날카롭고 멀어질수록 부드러운 그림자를 표현할 수 있다. 그러나 blocker search 영역에 실제 차폐물이 충분히 포함되지 않거나 filter radius가 과도하게 증가하면 그림자가 실제보다 넓게 퍼지는 over-blur가 발생한다. 또한 shadow map 자체의 bias 및 해상도 오차를 그대로 상속한다.
+
+### 4.4.3 RT 면광원 샘플링 구현
+
+RT 경로는 면광원을 8×8 grid, 총 64개 위치로 샘플링한다. 각 pixel은 hash로 생성한 회전값을 grid에 적용하여 고정 grid pattern을 완화한다. 각 광원 sample 위치까지 shadow ray를 발사하고, 보이는 sample의 비율을 visibility로 사용한다.
+
+이 방식은 실제 면광원 면적 중 가시적인 영역의 비율을 근사하므로 차폐물과 receiver의 기하 관계에 따라 penumbra가 형성된다. 반면 64개의 shadow ray가 필요하며, sample 수가 적거나 회전 패턴이 부적절하면 banding, noise 또는 temporal jitter가 나타날 수 있다.
+
+### 4.4.4 비교 결과 해석
+
+PCSS의 soft shadow는 blocker 거리로 filter 크기를 추정한 결과이며, 광원 면적의 가시성을 직접 계산한 결과가 아니다. 따라서 PCSS의 penumbra는 plausible approximation이지만, 복잡한 blocker와 큰 광원에서 실제 형태와 달라질 수 있다.
+
+RT 면광원 sampling은 가시성 적분 자체를 근사한다. Sample 수가 충분할수록 실제 soft shadow에 접근하지만, 비용과 variance가 증가한다. 이 비교는 래스터 근사의 오차와 RT 샘플링 오차가 서로 다른 성격을 가짐을 보여준다. PCSS의 오차는 주로 정보 표현과 heuristic에서 발생하고, RT의 오차는 유한 sample에 의한 분산에서 발생한다.
+
+### 4.4.5 결과 작성용 문장
+
+> PCSS는 단일 shadow map의 blocker depth를 이용하여 penumbra 크기를 추정하므로 낮은 비용으로 부드러운 그림자를 생성했지만, blocker search 실패와 filter radius 제한에 따라 over-blur 또는 불연속 경계가 나타났다. 반면 면광원 영역에 대한 64개의 shadow ray는 실제 가시 면적을 평균하여 기하적으로 자연스러운 penumbra를 생성했으나, 광선 수 증가와 sampling pattern 관리가 필요하였다.
+
+## 4.5 Phase 4. PBR Lighting: Legacy Lighting vs PBR
+
+### 4.5.1 단계의 역할
+
+Phase 4는 단순히 legacy lighting보다 PBR이 더 사실적임을 보이기 위한 단계가 아니다. 이후 shadow, reflection 및 GI 비교에서 두 경로가 동일한 표면 반응을 사용하도록 만드는 통제 단계이다.
+
+### 4.5.2 구현
+
+공통 `PBR.hlsli`에 GGX normal distribution, Smith geometry term, Fresnel-Schlick 및 Cook-Torrance 평가 함수를 구성하였다. Raster pixel shader와 RT closest-hit shader는 동일한 base color, metallic, roughness 및 AO 값을 읽고 공통 `EvaluatePBR` 함수를 호출한다.
+
+Procedural surface는 material ID를 통해 동일한 재질을 선택하며, helmet 모델은 diffuse, normal 및 ORM texture를 사용한다. Metallic 표면이 직접광이 없는 영역에서 완전히 검게 보이지 않도록 ambient specular baseline을 제공하지만, 실험 모드에 따라 ambient 및 environment contribution을 구분한다.
+
+### 4.5.3 발생 문제
+
+PBR 통합 과정에서 ambient 값이 의도와 다르게 남아 조명 세기를 0으로 설정해도 장면이 밝게 보이는 문제가 발생하였다. 또한 raster와 RT 경로가 normal map, material fallback 및 emissive panel을 다르게 처리하면 같은 장면에서도 결과가 달라졌다.
+
+이 문제는 비교 연구에서 공통 shading 기준이 필수임을 보여준다. Visibility 방식만 비교하려면 ambient, emissive, material fallback 및 tone mapping이 결과에 미치는 영향을 먼저 통제해야 한다.
+
+### 4.5.4 비교 결과 해석
+
+Legacy lighting과 PBR의 차이는 본 논문의 최종 비교 대상이면서 동시에 실험 오염 요인이다. 따라서 Phase 4 이후에는 PBR을 공통 기준으로 사용하고, legacy 결과는 엔진 변경 전후의 shading 구조 차이를 설명하는 보조 실험으로 제시한다.
+
+## 4.6 Phase 5. Reflection: SSR vs Reflection Ray
+
+### 4.6.1 실험 목적
+
+Phase 5에서는 반사 방향에서 장면 정보를 찾는 방법을 비교한다. Raster 경로는 SSR을 사용하고, RT 경로는 reflection ray를 사용한다.
+
+### 4.6.2 SSR 실패 조건
+
+SSR은 현재 화면 buffer에 존재하는 정보만 사용할 수 있다. 본 연구에서는 다음 세 가지 artifact를 관찰하기 위한 카메라 프리셋을 구성하였다.
+
+1. **Screen-edge cutoff:** 반사 ray가 화면 경계를 벗어나면서 반사가 갑자기 사라진다.
+2. **Off-screen missing:** 반사되어야 하는 물체가 현재 카메라 화면 밖에 있어 결과에 나타나지 않는다.
+3. **Depth discontinuity:** ray march가 박스 모서리와 같은 급격한 depth 변화 구간을 통과하며 잘못된 교차 또는 누락을 생성한다.
+
+이 현상들은 tuning만으로 완전히 해결하기 어렵다. SSR이 사용하는 현재 화면의 depth/color 정보에 필요한 장면이 존재하지 않기 때문이다.
+
+### 4.6.3 Reflection Ray 구현
+
+RT 경로는 closest-hit 위치에서 `reflect` 함수로 반사 방향을 계산하고 secondary ray를 발사한다. Reflection ray는 TLAS 전체를 질의하므로 화면 밖 물체와 가려진 기하를 찾을 수 있다.
+
+재귀 깊이는 1, 2, 4 단계로 제어한다. 두 개의 거울 박스를 배치하여 카메라가 Box B를 보고, B 내부에 Box A가 반사되며, A 내부에 helmet이 반사되는 경로를 구성하였다. 이 장면은 reflection depth가 단순 성능 파라미터가 아니라 표현 가능한 광로의 길이를 결정함을 보여준다.
+
+### 4.6.4 발생 문제
+
+다중 반사 구현에서는 다음 문제가 발생하였다.
+
+- Box의 raster geometry와 RT procedural normal 불일치
+- 거울 면 방향과 reflection path 배치 문제
+- recursion depth와 RTPSO 최대 깊이 불일치
+- 반사 ray origin epsilon에 의한 자기 교차
+- metallic 재질의 ambient 및 reflection contribution 처리
+- primary ray 화면과 reflection mode 화면의 혼동
+
+### 4.6.5 비교 결과 해석
+
+SSR의 artifact는 screen-space 정보가 불완전하기 때문에 발생한다. Reflection ray는 월드 공간 장면을 직접 질의하므로 이 구조적 누락을 해결한다. 그러나 RT는 재귀 깊이에 따라 비용이 증가하며, 완전한 mirror가 아닌 rough surface에서는 하나의 deterministic ray만으로 충분하지 않다.
+
+### 4.6.6 결과 작성용 문장
+
+> SSR에서 관찰된 screen-edge cutoff와 off-screen missing은 ray marching 정밀도보다 입력 정보의 범위에 의해 발생하였다. Reflection ray는 TLAS를 통해 화면 밖 기하를 탐색하여 해당 누락을 해결하였으며, 재귀 깊이를 증가시켜 mirror-in-mirror 경로를 표현할 수 있었다. 그러나 재귀 깊이 증가에 따른 ray 및 shading 호출 비용과 normal 정합성 관리가 필요하였다.
+
+## 4.7 Phase 6. Glossy Reflection: Prefiltered Environment Map vs Glossy Reflection Ray
+
+### 4.7.1 실험 목적
+
+Phase 6에서는 roughness가 있는 metallic 표면의 반사를 비교한다. Raster 경로는 GGX prefiltered environment cubemap을 사용하고, RT 경로는 GGX importance-sampled reflection ray를 사용한다.
+
+### 4.7.2 Raster Glossy 경로
+
+Raster 경로는 startup 과정에서 environment cubemap을 capture하고, GGX 분포에 따라 mip chain을 prefilter한다. Pixel shader는 reflection direction과 roughness를 사용하여 적절한 mip level을 조회한다. 이 방식은 실행 시 적은 texture lookup으로 안정적인 blur를 제공한다.
+
+그러나 environment map은 capture 위치를 기준으로 방향별 radiance만 저장한다. 따라서 shading point의 위치 차이, 가까운 물체에 의한 parallax, 국소 차폐 및 동적 장면 변화가 정확히 반영되지 않는다. 현재 구현은 단순화를 위해 split-sum BRDF LUT를 생략하고 제한된 형태의 IBL을 사용한다.
+
+### 4.7.3 RT Glossy 경로
+
+RT 경로는 roughness와 surface normal을 사용하여 GGX half-vector를 importance sampling하고, 해당 방향으로 reflection ray를 발사한다. Frame index 기반 sample을 사용하고 TAA를 통해 시간적으로 누적한다.
+
+이 방식은 현재 shading point에서 실제 장면을 질의하므로 위치 종속 반사와 차폐를 반영할 수 있다. 반면 frame당 sample 수가 제한되면 noise가 발생하고, 카메라 또는 물체가 움직일 때 누적 history의 유효성이 감소한다.
+
+### 4.7.4 비교 결과 해석
+
+Prefiltered environment map은 radiance 적분 결과를 사전에 방향별 texture로 축약한 방식이다. RT glossy reflection은 적분을 실행 중 확률적으로 추정한다. 전자는 안정성과 효율이 강점이며, 후자는 공간 정확성과 동적 장면 대응이 강점이다.
+
+이 단계는 혼합 렌더러의 필요성을 명확히 보여준다. 원거리 또는 낮은 중요도의 rough reflection은 prefiltered environment map으로 충분할 수 있으며, 근거리·고반사·위치 종속 표면에는 RT를 선택적으로 적용할 수 있다.
+
+### 4.7.5 결과 작성용 문장
+
+> Prefiltered environment map은 roughness에 따른 안정적인 glossy reflection을 낮은 실행 비용으로 제공했지만, capture 위치와 shading 위치의 차이로 인해 parallax 및 국소 차폐 오차가 발생하였다. GGX importance-sampled reflection ray는 현재 표면 위치의 실제 가시성을 반영했으나, 낮은 sample 수에서 noise가 발생하여 temporal accumulation이 필요하였다.
+
+## 4.8 Phase 7. Global Illumination: Environment/Probe Approximation vs Path Tracing
+
+### 4.8.1 실험 목적
+
+Phase 7에서는 직접광 이후의 diffuse 간접광을 비교한다. Raster baseline은 prefiltered environment cubemap의 낮은 주파수 정보를 사용하고, RT 경로는 cosine-weighted diffuse secondary ray와 재귀 깊이 제어를 사용하여 1-bounce 및 2-bounce 결과를 생성한다.
+
+### 4.8.2 Raster GI 경로
+
+Raster GI 경로는 surface normal 방향으로 environment cubemap의 높은 mip level을 조회하여 diffuse irradiance를 근사한다. 이 방식은 안정적이고 저렴하지만, 위치 정보를 거의 사용하지 않기 때문에 같은 normal을 가진 서로 다른 위치가 유사한 간접광을 받을 수 있다. 벽 근처의 color bleeding, 물체 뒤의 차폐 및 국소적인 간접광 변화 표현에는 한계가 있다.
+
+### 4.8.3 RT GI 경로
+
+RT GI 경로는 diffuse 표면에서 cosine-weighted hemisphere 방향을 생성하고 secondary ray를 발사한다. Secondary hit에서 얻은 radiance를 현재 표면의 diffuse color와 결합하며, 최대 재귀 깊이를 1 또는 2로 설정하여 간접광의 전달 범위를 비교한다. Cornell 스타일 장면의 색 벽과 흰 표면을 이용하여 위치별 color bleeding과 추가 bounce에 따른 광 전달 변화를 관찰한다.
+
+현재 구현은 Cornell 장면의 절차적 diffuse 표면에 대해 1-bounce와 2-bounce를 지원한다. 다만 multiple importance sampling과 production 수준 denoiser는 포함하지 않으며, textured mesh의 GI 경로는 1-bounce로 제한된다. 따라서 정적 카메라에서는 TAA 시간 누적으로 경향을 확인할 수 있지만, 낮은 sample 수에서는 noise가 남는다.
+
+### 4.8.4 비교 결과 해석
+
+Environment 기반 GI는 위치 종속성을 제거하여 매우 압축된 형태의 간접광을 제공한다. RT GI는 실제 secondary visibility와 hit radiance를 사용하여 위치별 색 번짐과 차폐를 표현할 수 있다. 그러나 GI는 shadow나 mirror reflection보다 적분 차원이 높기 때문에 RT 비용과 noise 문제가 가장 크게 나타나는 단계이다.
+
+### 4.8.5 결과 작성용 문장
+
+> Environment irradiance 기반 raster GI는 안정적인 저주파 간접광을 제공하였으나, 위치별 차폐와 색 번짐을 구분하지 못하였다. Diffuse secondary ray는 색상이 다른 벽과 인접한 표면에서 위치 종속 color bleeding을 생성했으며, 2-bounce 모드는 추가적인 광 전달을 표현하였다. 그러나 제한된 sample 수로 인해 noise와 시간 누적 의존성이 나타났다.
+
+---
+
+# 5. 종합 분석
+
+## 5.1 근사 기법의 공통 구조
+
+각 Phase의 래스터 기법은 서로 다른 효과를 다루지만 공통 구조를 가진다. 필요한 월드 공간 질의를 더 작은 데이터 표현으로 변환하고, 실행 중 해당 표현을 조회한다.
+
+- Shadow map은 광원별 visibility를 2D depth texture로 축약한다.
+- PCSS는 면광원 가시성을 blocker depth와 filter radius로 축약한다.
+- SSR은 반사 장면을 현재 화면 buffer로 제한한다.
+- Prefiltered environment map은 위치별 반사 radiance를 방향과 roughness로 축약한다.
+- Environment GI는 위치별 간접광을 낮은 주파수 방향 정보로 축약한다.
+
+이러한 축약은 높은 효율과 안정성을 제공한다. 동시에 축약 과정에서 제거된 정보가 필요한 조건에서는 구조적인 artifact가 발생한다.
+
+## 5.2 레이 트레이싱의 공통 구조
+
+대응하는 RT 방식은 대부분 “현재 hit point에서 새로운 방향으로 광선을 발사하고, 장면과의 교차 결과를 사용한다”는 공통 구조를 가진다.
+
+- Shadow ray는 구간 내 any-hit 존재 여부를 질의한다.
+- Area-light shadow ray는 여러 광원 sample에 대한 visibility를 적분한다.
+- Reflection ray는 반사 방향의 closest-hit radiance를 질의한다.
+- GGX ray는 microfacet 분포에 따른 방향의 radiance를 샘플링한다.
+- Diffuse secondary ray는 반구 방향의 incident radiance를 샘플링한다.
+
+RT는 근사 표현에서 누락된 월드 공간 정보를 복원하는 것이 아니라, 필요한 정보를 실행 중 직접 질의한다. 이 차이가 구조적 artifact를 줄이는 원인이다.
+
+## 5.3 오차의 성격 비교
+
+래스터 근사와 RT의 오차는 서로 다른 성격을 가진다.
+
+| 구분 | Raster 근사 | Ray Tracing |
+|---|---|---|
+| 주요 오차 원인 | 정보 축약, 해상도, 투영, heuristic | 유한 sample, epsilon, recursion 제한 |
+| 시간적 특성 | 대체로 안정적이나 구조적 artifact 지속 | sample noise가 있으나 누적으로 감소 가능 |
+| 공간 범위 | screen/light/capture 범위에 제한 | acceleration structure에 등록된 월드 전체 |
+| 비용 제어 | texture 해상도와 filter 복잡도 | ray 수, hit shading, recursion depth |
+| 디버깅 중심 | 좌표 변환, depth, buffer 내용 | ray direction, hit geometry, payload, AS |
+
+이 비교를 통해 “Raster는 부정확하고 RT는 정확하다”는 단순 결론을 피할 수 있다. Raster의 오차는 예측 가능하고 안정적인 대신 특정 조건에서 사라지지 않으며, RT의 오차는 sampling을 통해 줄일 수 있지만 비용과 시간적 안정성 문제가 발생한다.
+
+## 5.4 구현 과정의 버그 분류
+
+본 연구 과정에서 발생한 문제는 다음 네 범주로 분류할 수 있다.
+
+### 5.4.1 기하 및 좌표계 정합성
+
+- Raster와 RT의 transform 행렬 표현 차이
+- procedural geometry의 vertex 위치 및 normal 불일치
+- winding order와 back-face culling
+- 벽, 바닥 및 박스 접촉부 seam
+
+### 5.4.2 수치 안정성
+
+- Shadow map depth bias와 slope-scaled bias
+- Shadow ray 및 reflection ray origin epsilon
+- 접촉부 light leak와 self-intersection
+- roughness가 0에 가까울 때 BRDF 수치 폭증
+
+### 5.4.3 샘플링 및 시간 누적
+
+- 고정 grid pattern
+- per-pixel rotated grid
+- stochastic jitter
+- GGX importance sampling noise
+- TAA history와 카메라 이동
+
+### 5.4.4 엔진 리소스 및 파이프라인
+
+- descriptor register 충돌
+- UAV/SRV resource transition
+- shader payload 초기화
+- RTPSO recursion depth 제한
+- raster/RT material 및 emissive 처리 불일치
+
+이러한 문제는 최종 이미지 품질뿐 아니라 두 렌더링 방식의 내부 구조를 이해하는 학습 과정 자체가 연구 결과임을 보여준다.
+
+## 5.5 혼합 렌더러 설계 원칙
+
+본 연구 결과로부터 다음과 같은 혼합 렌더러 설계 원칙을 제안할 수 있다.
+
+1. **Raster를 기본 primary visibility 경로로 사용한다.** 화면에 보이는 기하의 기본 shading과 G-buffer 생성은 raster가 높은 처리량을 제공한다.
+2. **정보가 충분한 경우 기존 근사를 유지한다.** 작은 광원, 원거리 그림자, 낮은 중요도의 rough reflection 및 정적 간접광은 shadow map, environment map 또는 probe가 효율적이다.
+3. **정보 손실이 명확한 경우 RT를 적용한다.** Off-screen reflection, 복잡한 접촉 그림자, 큰 면광원의 가시성, 근거리 glossy reflection 및 동적 color bleeding은 ray query의 가치가 높다.
+4. **재질 및 중요도에 따라 ray budget을 배분한다.** Metallic, 낮은 roughness, 화면 중심, 큰 projected area 및 높은 contrast 영역에 더 많은 ray를 배분할 수 있다.
+5. **Raster 결과를 RT의 fallback 또는 guide로 사용한다.** Shadow map과 SSR 결과를 우선 사용하고, confidence가 낮은 pixel에만 ray를 발사하는 구조로 확장할 수 있다.
+6. **시간 누적과 denoising을 파이프라인 일부로 취급한다.** RT 효과의 sample count만 비교하지 않고, temporal reuse 비용과 안정성을 함께 평가해야 한다.
+
+## 5.6 제안하는 후속 혼합 렌더러
+
+향후 구현할 혼합 렌더러는 다음 순서로 구성할 수 있다.
+
+1. Raster primary pass에서 depth, normal, material, motion vector 및 direct lighting을 생성한다.
+2. Shadow map과 SSR을 기본 결과로 계산한다.
+3. Shadow map 경계, SSR miss, screen edge 및 high-metallic pixel에 confidence 값을 계산한다.
+4. Confidence가 낮거나 시각적으로 중요한 pixel에만 shadow/reflection ray를 발사한다.
+5. RT 결과를 raster 결과와 결합하고 temporal accumulation 및 denoising을 적용한다.
+6. GPU 시간 budget에 따라 ray 수와 적용 영역을 동적으로 조정한다.
+
+이 구조는 본 연구의 각 Phase를 독립적인 데모에서 하나의 선택적 hybrid pipeline으로 연결하는 최종 확장 방향이다.
+
+---
+
+# 6. 논의 및 한계
+
+## 6.1 단순 장면의 의미와 한계
+
+Cornell 스타일 장면은 복잡한 production scene의 성능과 다양성을 대표하지 않는다. 기하 수가 적고 대부분 정적이며, 광원과 재질 종류도 제한적이다. 따라서 acceleration structure build/update 비용, 다수 동적 오브젝트, vegetation alpha test, animation 및 대규모 streaming 조건을 평가할 수 없다.
+
+그러나 단순 장면은 특정 artifact의 인과 관계를 명확히 관찰할 수 있다는 장점이 있다. 본 연구는 이 장점을 활용하여 shadow bias, screen-space 정보 누락, reflection depth 및 color bleeding을 분리하여 분석한다.
+
+## 6.2 성능 평가의 범위
+
+본 장면은 기하와 재질이 제한된 진단 장면이므로 여기서 측정한 GPU 시간은 실제 게임 장면에 일반화할 수 없다. 장면 복잡도가 낮으면 traversal이 상대적으로 저렴할 수 있으며, 반대로 sample 수가 높은 실험 효과는 실제 production 설정보다 비쌀 수 있다. 이러한 이유로 본 연구는 GPU ms 비교를 평가 범위에서 제외하고, sample 수, 재귀 깊이, 필요한 장면 표현 및 추가 파이프라인 단계의 차이를 통해 각 방식의 계산 요구를 설명한다.
+
+## 6.3 Shading 모델의 단순화
+
+공통 Cook-Torrance BRDF를 사용하지만, diffuse normalization, energy compensation, BRDF LUT, multiple scattering 및 완전한 emissive transport는 단순화되어 있다. 따라서 결과는 물리적으로 완전한 reference rendering이 아니라 비교 실험용 shading baseline이다.
+
+## 6.4 Sampling과 Denoising
+
+RT glossy 및 GI는 확률적 sample을 사용하지만 production 수준의 denoiser는 구현되지 않았다. TAA는 시간 누적에 도움을 주지만, disocclusion과 빠른 카메라 이동에서 ghosting 또는 history invalidation 문제가 발생할 수 있다. 향후 SVGF, ReBLUR 또는 효과별 temporal-spatial filter와 유사한 구조를 검토할 필요가 있다.
+
+## 6.5 향후 연구
+
+- Raster confidence 기반 선택적 shadow/reflection ray
+- Ray budget의 화면 중요도 기반 동적 배분
+- Dynamic BLAS/TLAS update 비용 측정
+- 2-bounce를 초과하는 다중 bounce GI, multiple importance sampling 및 denoising
+- Probe/lightmap update와 RT GI 혼합
+- 복잡한 공개 장면에서의 재검증
+- Reference path tracer와의 정량 이미지 오차 비교
+
+---
+
+# 7. 결론
+
+본 연구는 래스터라이제이션과 레이 트레이싱을 서로 경쟁하는 완전한 렌더러로 비교하는 대신, 동일한 시각 효과를 계산하기 위해 서로 다른 장면 정보 질의를 사용하는 기술로 분석하였다. Microsoft D3D12 Raytracing MiniEngine Sample을 기반으로 Cornell 스타일 진단 장면과 단계별 비교 모드를 구축하고, shadow map과 shadow ray, PCSS와 면광원 sampling, SSR과 reflection ray, prefiltered environment map과 GGX importance sampling, environment irradiance와 1/2-bounce diffuse ray를 동일 엔진에서 구현하였다.
+
+비교 결과, 래스터 근사 기법의 주요 artifact는 제한된 texture 또는 screen-space 표현에 필요한 장면 정보가 포함되지 않을 때 발생한다. RT는 가속 구조를 대상으로 월드 공간 질의를 수행하여 이러한 구조적 누락을 완화할 수 있다. 그러나 RT 역시 ray epsilon, recursion depth, sampling variance, temporal accumulation 및 엔진 통합 복잡성을 요구한다.
+
+따라서 실시간 렌더링에서의 핵심은 한 방식을 다른 방식으로 완전히 대체하는 것이 아니다. Raster의 높은 처리량과 안정적인 근사를 유지하면서, 정보가 부족하거나 정확도가 중요한 지점에 선택적으로 ray query를 적용하는 것이 중요하다. 본 연구에서 구축한 비교 프레임워크는 이러한 혼합 렌더러를 설계하기 위한 실험 기반을 제공하며, 각 렌더링 기법의 결과뿐 아니라 그 결과가 발생하는 파이프라인 원인을 학습하고 분석할 수 있다는 점에 의의가 있다.
+
+---
+
+# 8. 결과 그림 및 표 구성안
+
+## 8.1 필수 그림
+
+1. 전체 시스템 구조도: Raster pipeline, DXR pipeline, 공유 scene/material/light data
+2. Cornell 스타일 실험 장면과 오브젝트 배치 Top View
+3. Phase 2: Shadow map 해상도 및 bias 변화 대 shadow ray
+4. Phase 3: PCSS over-blur 대 64-ray area-light soft shadow
+5. Phase 5: SSR screen-edge/off-screen/depth-discontinuity 대 reflection ray
+6. Phase 5: Reflection depth 1/2/4 비교
+7. Phase 6: Prefiltered environment map 대 RT glossy reflection
+8. Phase 7: Raster GI 대 RT 1/2-bounce color bleeding
+9. 구현 과정 bug 사례: seam, acne, peter-panning, ray epsilon light leak
+10. 향후 hybrid renderer 구조도
+
+## 8.2 필수 표
+
+1. 원본 Microsoft sample과 수정 프로젝트 기능 차이
+2. 렌더링 모드 및 단축키
+3. Phase별 Raster 표현, RT 질의, 예상 artifact 및 계산 복잡도
+4. 실험 환경: GPU, 해상도, build configuration, shadow map 크기, sample 수
+5. 독립 변수 변화에 따른 시각적 현상
+6. Phase별 관찰 현상, 파이프라인 원인 및 결론
+7. 발생 버그와 원인 및 해결 방법
+
+## 8.3 결과 표 템플릿
+
+| 비교 모드 | 설정 | 관찰 현상 | 파이프라인 원인 | 결론 |
+|---|---|---|---|---|
+| Raster Shadow | Shadow map 512 | 경계 aliasing | 제한된 광원 depth texture 해상도 | 해상도 의존적 오차 |
+| Raster Shadow | Shadow map 2048 | 경계 개선 | 더 조밀한 depth sample | 품질은 향상되지만 구조적 근사는 유지 |
+| RT Shadow | 1 ray | hard shadow | 광원 중심 한 점에 대한 visibility query | 정확한 접촉부, 면광원 penumbra 없음 |
+| RT Shadow | 64 rays | soft shadow | 면광원 영역에 대한 다중 visibility query | 위치별 penumbra 표현 |
+| Raster SSR | fixed settings | off-screen 누락 | 현재 화면 color/depth만 조회 | 화면 밖 정보 복원 불가 |
+| RT Reflection | depth 1/2 | 단일/다중 반사 | TLAS 대상 월드 공간 재귀 ray query | 화면 밖 및 다중 반사 표현 |
+| Raster Glossy | roughness 0.3 | 안정적, parallax 오차 | 위치가 압축된 prefiltered cubemap | 안정성과 위치 정확도의 교환 |
+| RT Glossy | roughness 0.3 | noise, 위치 정확도 | 현재 hit 위치의 GGX 방향 sampling | 정확한 가시성과 sampling variance |
+| Raster GI | environment irradiance | 균일한 간접광 | 방향 중심의 저주파 환경 정보 | 위치별 차폐와 색 번짐 제한 |
+| RT GI | 1/2-bounce | color bleeding, noise | 재귀 diffuse secondary ray | 위치 종속 간접광과 누적 필요성 |
+
+---
+
+# 9. 참고문헌 구성안
+
+최종 논문에서는 다음 문헌 범주를 포함한다.
+
+1. DirectX Raytracing specification 및 Microsoft D3D12 Raytracing samples
+2. Real-Time Rendering
+3. Physically Based Rendering: From Theory to Implementation
+4. Shadow Mapping 및 Percentage-Closer Filtering
+5. Percentage-Closer Soft Shadows
+6. Screen-Space Reflection 관련 논문 및 기술 자료
+7. Cook-Torrance microfacet BRDF와 GGX
+8. Importance Sampling 및 Monte Carlo integration
+9. Real-time ray tracing denoising
+10. Hybrid rendering 및 production ray tracing 사례
+
+---
+
+# 10. 작성 시 유지할 핵심 주장
+
+논문 전체에서 다음 표현을 일관되게 유지한다.
+
+> 본 연구는 Rasterization과 Ray Tracing의 절대적 우열을 판정하는 성능 벤치마크가 아니다. 제한된 장면 정보에 기반한 Raster 근사의 실패 조건을 재현하고, 대응하는 월드 공간 ray query가 무엇을 다르게 계산하는지 엔진 파이프라인 수준에서 분석하는 비교 연구이다.
+
+> 단순한 Cornell 스타일 장면은 실제 게임 장면을 대표하기 위한 것이 아니라, 변수 통제와 artifact 원인 분석을 위한 diagnostic scene이다.
+
+> RT는 모든 문제를 자동으로 해결하지 않는다. Raster의 구조적 정보 손실을 줄이는 대신 traversal 비용, sampling variance, recursion, epsilon 및 엔진 통합 문제를 새롭게 요구한다.
+
+> 최종 목표는 Raster를 제거하는 것이 아니라, Raster 데이터가 충분한 영역에서는 근사를 유지하고 정보가 부족한 영역에 선택적으로 RT 질의를 연결하는 혼합 렌더러를 설계하는 것이다.
