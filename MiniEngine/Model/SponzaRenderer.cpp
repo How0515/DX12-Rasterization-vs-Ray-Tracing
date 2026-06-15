@@ -85,6 +85,7 @@ namespace Sponza
     Vector3  m_PointLightPos;
     Vector3  m_PointLightColor;
     uint32_t m_DebugView = 0;
+    uint32_t m_GlossyIBLEnabled = 0;
 
     static constexpr float kAreaLightPanelY = 1.445f;
 
@@ -808,7 +809,7 @@ void Sponza::RenderScene(
     psConstants.FrameIndexMod2    = FrameIndex;
     psConstants.debugView         = m_DebugView;
     psConstants.rasterShadowsEnabled = skipShadowMap ? 0u : 1u;
-    psConstants.padding           = 0;
+    psConstants.padding           = m_GlossyIBLEnabled;
     psConstants.pointLightPos     = m_PointLightPos;
     psConstants.pointLightColor   = m_PointLightColor;
     psConstants.areaShadowParams  = Vector4(

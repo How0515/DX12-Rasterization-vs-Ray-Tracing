@@ -60,6 +60,7 @@ namespace Sponza
     extern Math::Vector3 m_PointLightPos;
     extern Math::Vector3 m_PointLightColor;
     extern uint32_t      m_DebugView;
+    extern uint32_t      m_GlossyIBLEnabled; // 1 when RTM_RASTER_GLOSSY is active
     extern NumVar        m_BoxARoughness; // [0,1] roughness for Box A; Box B stays as mirror
 
     // -------------------------------------------------------------------------

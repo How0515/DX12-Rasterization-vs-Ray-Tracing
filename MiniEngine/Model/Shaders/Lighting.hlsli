@@ -31,7 +31,7 @@ cbuffer PSConstants : register(b0)
     uint DebugView;
     // Named fields occupy the 8-byte slot before the aligned point-light vectors.
     uint RasterShadowsEnabled;
-    uint Padding;
+    uint GlossyIBLEnabled;  // 1 = sample prefiltered env map (RTM_RASTER_GLOSSY); 0 = skip IBL term
     float4 PointLightPos;    // xyz = world position, w = unused
     float4 PointLightColor;  // xyz = radiance, w = unused
     float4 AreaShadowParams; // x = near, y = far, z = light size in UV, w = max PCSS radius in UV

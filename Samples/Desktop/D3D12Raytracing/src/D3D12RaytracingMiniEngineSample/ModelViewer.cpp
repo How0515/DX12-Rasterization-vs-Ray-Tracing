@@ -1188,7 +1188,8 @@ void D3D12RaytracingMiniEngineSample::RenderScene(void)
     static uint32_t s_frameCount = 0;
     g_dynamicCb.frameIndex = s_frameCount++;
 
-    Sponza::m_DebugView = (uint32_t)(int)g_DebugView;
+    Sponza::m_DebugView        = (uint32_t)(int)g_DebugView;
+    Sponza::m_GlossyIBLEnabled = (rayTracingMode == RTM_RASTER_GLOSSY) ? 1u : 0u;
     Sponza::RenderScene(gfxContext, m_Camera, viewport, scissor, skipDiffusePass, skipShadowMap);
 
     // Some systems generate a per-pixel velocity buffer to better track dynamic and skinned meshes.  Everything

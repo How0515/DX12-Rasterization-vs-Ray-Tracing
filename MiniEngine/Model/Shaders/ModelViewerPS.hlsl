@@ -121,7 +121,9 @@ MRT main(VSOutput vsOutput)
     colorSum += SAMPLE_TEX(texEmissive).rgb;
 
     // Glossy IBL: GGX prefiltered environment map (split-sum approx, V=N, no BRDF LUT).
-    // mip 0 = roughness 0 (mirror); mip 6 = roughness 1 (diffuse blurred env).
+    // Only active in RTM_RASTER_GLOSSY (key 9); other raster modes skip this term
+    // so key 2 (RTM_OFF) stays as the direct-lighting-only baseline.
+    if (GlossyIBLEnabled)
     {
         float  NdotV     = saturate(dot(normal, V));
         float3 R         = reflect(-V, normal);
