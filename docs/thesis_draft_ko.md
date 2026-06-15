@@ -582,29 +582,61 @@ Reflection Depth를 단계별로 증가시키면서 각 Depth에서 관찰된 �
 
 ### 4.7.1 실험 목적
 
-Phase 6에서는 roughness가 있는 metallic 표면의 반사를 비교한다. Raster 경로는 GGX prefiltered environment cubemap을 사용하고, RT 경로는 GGX importance-sampled reflection ray를 사용한다.
+Phase 6에서는 roughness가 있는 metallic 표면의 반사를 비교한다. Raster 경로는 GGX prefiltered environment cubemap(PEM)을 사용하고, RT 경로는 GGX importance-sampled reflection ray를 사용한다.
+
+실험 장면은 Phase 5의 mirror box 배치를 재사용한다. 좌측 Box A의 roughness를 UI 슬라이더로 0.0~1.0 범위에서 변경 가능하게 하여 동일 장면에서 sharp/glossy/diffuse-like 반사를 비교하였다. 우측 Box B는 roughness=0.02의 perfect mirror로 고정하여 기준점 역할을 유지하였다. 비교에 사용한 카메라 프리셋은 세 가지이다: (1) Box B 근처에서 Box A를 비스듬히 촬영하여 PEM parallax 오차를 확인하는 구도, (2) Box A 정면에서 roughness sweep을 캡처하는 구도, (3) 정면 카메라에서 Box B → Box A → Helmet 재귀 반사 체인과 glossy depth를 비교하는 구도.
 
 ### 4.7.2 Raster Glossy 경로
 
-Raster 경로는 startup 과정에서 environment cubemap을 capture하고, GGX 분포에 따라 mip chain을 prefilter한다. Pixel shader는 reflection direction과 roughness를 사용하여 적절한 mip level을 조회한다. 이 방식은 실행 시 적은 texture lookup으로 안정적인 blur를 제공한다.
+Raster 경로는 startup 시 장면 중심 (0, 0.7, 0)에서 6방향으로 장면을 렌더링하여 `g_EnvCubemap`(128×128, RGBA16F, 7 mip level)을 생성한다. 이후 GGX Prefilter Compute Shader가 각 mip level에서 GGX importance sampling으로 N개 방향을 적분하여 `g_PrefilteredEnv`를 생성한다. Mip 0은 원본 cubemap과 같고, 상위 mip일수록 더 넓은 GGX lobe를 표현한다. Sample 수 N은 mip 0에서 512이며 상위 mip에서는 줄인다. Roughness와 mip 레벨의 관계는 `mip = roughness × 6.0`이며, 내부적으로 `alpha = roughness²`를 사용한다.
 
-그러나 environment map은 capture 위치를 기준으로 방향별 radiance만 저장한다. 따라서 shading point의 위치 차이, 가까운 물체에 의한 parallax, 국소 차폐 및 동적 장면 변화가 정확히 반영되지 않는다. 현재 구현은 단순화를 위해 split-sum BRDF LUT를 생략하고 제한된 형태의 IBL을 사용한다.
+Pixel shader에서는 표면 법선과 view direction으로 반사 방향 R을 계산하고, `g_PrefilteredEnv.SampleLevel(sampler, R, mip)`으로 적절한 mip level을 조회한다. Fresnel 항은 `F_Schlick(NdotV, F0)`로 계산하여 glossy 기여에 곱한다. 단, 현재 구현은 split-sum BRDF LUT를 생략하므로 specular reflectance의 절대값보다 roughness에 따른 상대적 변화와 Raster/RT 구조 차이 비교에 초점을 맞춘다.
+
+이 방식의 핵심 제한은 캡처 위치가 1개라는 점이다. 장면 중심의 단일 cubemap은 방향별 radiance를 저장하므로, shading point가 캡처 위치와 다를 때 발생하는 parallax 오차, 가까운 물체에 의한 국소 차폐, 동적 장면 변화를 반영하지 못한다. 또한 recursive glossy reflection도 불가능하다.
 
 ### 4.7.3 RT Glossy 경로
 
-RT 경로는 roughness와 surface normal을 사용하여 GGX half-vector를 importance sampling하고, 해당 방향으로 reflection ray를 발사한다. 현재 구현은 metallic hit마다 frame당 reflection ray 1개를 발사하는 1 spp/frame 방식이며, frame index 기반 sample을 TAA로 시간적으로 누적한다. Roughness가 매우 낮은 표면은 확률적 GGX sampling 대신 deterministic mirror 방향을 사용한다.
+RT 경로는 closest-hit에서 `ImportanceSampleGGX()`를 호출하여 GGX half-vector H를 생성하고, `reflect(incident, H)`로 reflection 방향을 결정한 뒤 secondary ray를 발사한다. `ImportanceSampleGGX()`는 균등 분포 2D 입력 `Xi`를 받아 `alpha=roughness²`에 대응하는 phi/cosTheta를 계산하고, tangent-space H를 TBN 행렬로 world space로 변환한다.
 
-이 방식은 현재 shading point에서 실제 장면을 질의하므로 위치 종속 반사와 차폐를 반영할 수 있다. 반면 frame당 sample 수가 제한되면 noise가 발생하고, 카메라 또는 물체가 움직일 때 누적 history의 유효성이 감소한다.
+DXR hit shader에는 compute shader의 `SV_DispatchThreadID`에 해당하는 built-in이 없다. 픽셀 좌표를 payload로 전달하고, `pixelPos.x × 1973 + pixelPos.y × 9277 + frameIndex × 26699`를 seed로 Halton 수열의 2D 좌표를 계산하여 `Xi`로 사용한다. 이를 통해 pixel마다 다른 GGX 방향을 선택하고, frame마다 다른 방향을 선택하여 TAA로 시간적 누적이 가능하다.
 
-### 4.7.4 비교 결과 해석
+Roughness가 0.02 미만인 표면은 확률적 GGX sampling 대신 `reflect(incident, normal)`을 사용한다. 이를 통해 roughness=0 극한에서 GGX lobe가 delta function으로 수렴하는 물리적 거동을 표현하며, Phase 5의 perfect mirror 경로와의 연속성을 보장한다. GGX 방향이 표면 법선 아래를 향하는 경우(`dot(reflDir, normal) ≤ 0`)는 반사 기여를 0으로 처리한다.
 
-Prefiltered environment map은 radiance 적분 결과를 사전에 방향별 texture로 축약한 방식이다. RT glossy reflection은 적분을 실행 중 확률적으로 추정한다. 전자는 안정성과 효율이 강점이며, 후자는 공간 정확성과 동적 장면 대응이 강점이다.
+재귀 구조는 Phase 5와 동일하게 payload의 depth를 통해 제어된다. 각 재귀 hit에서 독립적으로 GGX 샘플링을 수행하므로, recursion depth가 증가할수록 각 경로의 분산이 누적되어 noise가 증가한다.
 
-이 단계는 혼합 렌더러의 필요성을 명확히 보여준다. 원거리 또는 낮은 중요도의 rough reflection은 prefiltered environment map으로 충분할 수 있으며, 근거리·고반사·위치 종속 표면에는 RT를 선택적으로 적용할 수 있다.
+### 4.7.4 발생 문제
 
-### 4.7.5 결과 작성용 문장
+Glossy reflection 구현 과정에서 발생한 문제와 조치는 다음과 같다.
 
-> Prefiltered environment map은 roughness에 따른 안정적인 glossy reflection을 낮은 실행 비용으로 제공했지만, capture 위치와 shading 위치의 차이로 인해 parallax 및 국소 차폐 오차가 발생하였다. GGX importance-sampled reflection ray는 현재 표면 위치의 실제 가시성을 반영했으나, 낮은 sample 수에서 noise가 발생하여 temporal accumulation이 필요하였다.
+| 발생 조건 | 관찰 현상 | 파이프라인 원인 | 조치 |
+|---|---|---|---|
+| Hit shader에서 픽셀 좌표 필요 | SV_DispatchThreadID 없어 무작위 샘플 구성 불가 | DXR hit shader는 dispatch 기반이 아닌 ray hit 기반 실행 | pixelPos를 payload로 전달, frameIndex와 결합하여 Halton seed 계산 |
+| GGX 샘플 방향이 법선 아래를 향함 | 반사 방향이 표면 뒤를 향해 잘못된 교차 발생 | 높은 roughness에서 GGX lobe가 반구를 넘어갈 수 있음 | `dot(reflDir, normal) ≤ 0` 검사 후 해당 샘플 기여를 0으로 처리 |
+| roughness=0.0에서 GGX 수치 불안정 | specular가 폭증하거나 방향이 불안정해짐 | alpha→0일 때 GGX 분모 극한 | roughness < 0.02 분기로 `reflect()` 직접 사용 |
+| Raster PEM의 parallax 오차 | Box B 반사면에 Box A가 보이지 않음 | cubemap이 단일 중심 위치에서 캡처되어 위치별 차이가 없음 | 구조적 한계로 기록, RT와의 비교 포인트로 활용 |
+| 재귀 깊이 증가 시 noise 누적 | depth=2에서 noise가 depth=1보다 크게 증가 | 각 재귀 hit마다 독립 GGX 샘플링으로 분산이 곱으로 누적됨 | TAA 시간 누적으로 완화, 분산 누적 특성은 비교 관찰 결과로 기록 |
+
+### 4.7.5 비교 결과 해석
+
+Roughness sweep 실험에서 관찰한 두 경로의 반응은 다음과 같다.
+
+| roughness | Raster PEM | RT Glossy |
+|---|---|---|
+| 0.00 (mip 0) | 원본 cubemap, sharp mirror | `reflect()` 사용, Phase 5 mirror와 동일 |
+| 0.17 (mip 1) | 약간 blur, 안정적 | 좁은 GGX lobe, 고주파 noise 시작 |
+| 0.33 (mip 2) | 중간 blur | 더 넓은 lobe, noise 증가, 누적 후 glossy |
+| 0.60 (mip 4) | 흐릿, 안정적 | 넓은 lobe, 강한 noise, TAA로 부분 완화 |
+| 1.00 (mip 6) | diffuse-like, noise 없음 | 반구 거의 균등 sampling, 매우 높은 noise |
+
+Parallax 비교(C1 구도) 결과, Box B 반사면에서 PEM은 Box A를 포함하지 않았다. Cubemap이 장면 중심 1개 위치에서 캡처되므로 Box B의 실제 위치에서 본 Box A의 방향 정보가 없기 때문이다. RT 경로는 Box B hit에서 발사한 ray가 실제 Box A 기하와 교차하여 Box A의 glossy 반사를 포함하였다.
+
+Prefiltered environment map은 radiance 적분 결과를 사전에 방향별 texture로 축약하여 안정적이고 효율적인 glossy를 제공한다. RT glossy reflection은 적분을 실행 중 확률적으로 추정하여 위치 종속 반사와 재귀 경로를 표현한다. Roughness가 높을수록 PEM은 안정적인 blur를 유지하는 반면 RT는 GGX lobe가 넓어지면서 분산이 커진다. Recursive glossy에서는 depth마다 분산이 누적되어 높은 roughness와 깊은 재귀 조합에서 noise가 가장 크게 나타났다.
+
+이 단계는 혼합 렌더러의 필요성을 명확히 보여준다. 원거리 또는 낮은 중요도의 rough reflection은 PEM으로 충분할 수 있으며, 근거리·고반사·위치 종속 표면에는 RT를 선택적으로 적용할 수 있다.
+
+### 4.7.6 결과 작성용 문장
+
+> Prefiltered environment map은 `mip = roughness × 6.0` 매핑으로 roughness 변화에 따른 안정적인 glossy blur를 제공했지만, 단일 중심 위치의 cubemap 캡처로 인해 Box B 반사면에서 Box A가 누락되는 parallax 오차가 관찰되었다. GGX importance-sampled reflection ray는 Box B의 실제 hit 위치에서 발사하여 Box A를 포함한 위치 종속 반사를 표현하였으나, roughness=0.33 이상에서 1 spp/frame의 noise가 두드러졌고 roughness와 recursion depth가 함께 증가할 때 noise가 누적되었다. Roughness < 0.02에서는 `reflect()`로 분기하여 Phase 5의 mirror 경로와의 연속성을 보장하였다.
 
 ## 4.8 Phase 7. Global Illumination: Environment/Probe Approximation vs Path Tracing
 
@@ -852,10 +884,11 @@ RT 1-SPP GI buffer
 6. Phase 4: AO/Roughness/Metallic/Normal debug view의 Raster/RT 비교
 7. Phase 5: SSR screen-edge/off-screen/depth-discontinuity 대 reflection ray
 8. Phase 5: Reflection Depth 2/3/5 비교 — 반사 체인 진행 단계별 캡처
-9. Phase 6: Prefiltered environment map 대 RT glossy reflection
-10. Phase 7: Raster GI 대 RT 1/2-bounce color bleeding
-11. 구현 과정 bug 사례: seam, acne, peter-panning, ray epsilon light leak
-12. 향후 hybrid renderer 구조도
+9. Phase 6: Raster PEM vs RT Glossy roughness sweep (0.0/0.17/0.33/0.60/1.00) 비교
+10. Phase 6: Box B 반사면에서 Box A parallax 오차 — PEM 누락 vs RT 위치 정확 반사
+11. Phase 7: Raster GI 대 RT 1/2-bounce color bleeding
+12. 구현 과정 bug 사례: seam, acne, peter-panning, ray epsilon light leak
+13. 향후 hybrid renderer 구조도
 
 ## 8.2 필수 표
 
@@ -893,8 +926,12 @@ RT 1-SPP GI buffer
 | RT Reflection | Depth 2 (1회 반사) | 벽·그림자가 주로 반사됨, 헬멧 미관찰 | 1회 반사 광로만 열림 | 반사 체인의 첫 단계 |
 | RT Reflection | Depth 3 (2회 반사) | 좌측 박스 우측면에 우측 박스 등장 | 2회 반사로 Box–Box 경로 열림 | 바닥-박스 간 재귀 반사 더 명확 |
 | RT Reflection | Depth 5 (4회 반사) | 헬멧 반사가 바닥·좌측 박스 우측면에 등장, 체인 완성 | 4회 반사로 Camera→Floor→Left→Right→Helmet 완성 | Depth 5 이상에서 추가 변화 없이 수렴 |
-| Raster Glossy | roughness 0.3 | 안정적, parallax 오차 | 위치가 압축된 prefiltered cubemap | 안정성과 위치 정확도의 교환 |
-| RT Glossy | roughness 0.3, 1 spp/frame + TAA | 누적 전 noise, 누적 후 roughness blur 관찰 가능 | 현재 hit 위치의 GGX 방향 sampling | 정확한 가시성과 시간 누적 필요성 |
+| Raster PEM | roughness 0.0~1.0, mip=roughness×6 | roughness 증가에 따른 안정적인 blur, noise 없음 | 단일 중심 위치 GGX 적분 결과를 mip chain에 저장 | 안정적, parallax·동적 장면 반영 불가 |
+| Raster PEM | Box B에서 Box A 반사 관찰 | Box A 누락, 배경 환경만 반사됨 | 캡처 위치 기준 방향 정보만 존재, Box A 위치 반영 안 됨 | 단일 캡처 위치의 구조적 parallax 오차 |
+| RT Glossy | roughness 0.0 | `reflect()` 분기, Phase 5 mirror와 동일 | roughness < 0.02 임계값으로 deterministic 경로 사용 | GGX lobe delta function 수렴과 연속성 보장 |
+| RT Glossy | roughness 0.33, 1 spp/frame + TAA | 눈에 띄는 noise, 누적 후 glossy blur 관찰 가능 | 넓어진 GGX lobe와 낮은 spp의 분산 증가 | 위치 정확 반사, 시간 누적 필요 |
+| RT Glossy | Box B에서 Box A 반사 관찰 | Box A의 glossy 반사 포함 | Box B hit 위치에서 발사한 ray가 실제 Box A와 교차 | 위치 종속 local reflection 표현 |
+| RT Glossy | depth 2, roughness 0.33 | depth 1보다 noise 크게 증가 | 재귀 hit마다 독립 GGX 샘플로 분산 누적 | roughness·depth 증가 시 noise 복합 증가 |
 | Raster GI H | 공통 diffuse 재질, environment irradiance | 색 영향이 넓고 균일하게 퍼짐 | 방향 중심의 저주파 환경 정보 | 안정적이나 위치별 전달 경로 구분 제한 |
 | RT GI G | 공통 diffuse 재질, 1-bounce, 1 spp/frame + TAA | 강한 초기 noise, 국소 색 변화는 누적 후 검증 필요 | cosine-weighted diffuse secondary ray 1개 | 위치 종속 간접광과 시간 누적 필요성 |
 | RT GI J | 공통 diffuse 재질, 2-bounce, 1 spp/frame + TAA | 추가 diffuse 전달 가능, noise로 판독 어려움 | 두 번째 diffuse continuation ray | 충분한 누적 또는 denoising 필요 |
