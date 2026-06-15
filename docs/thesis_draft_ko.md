@@ -454,21 +454,51 @@ RT 면광원 sampling은 광원 표면의 visibility 적분 자체를 유한 sam
 
 Phase 4는 단순히 legacy lighting보다 PBR이 더 사실적임을 보이기 위한 단계가 아니다. 이후 shadow, reflection 및 GI 비교에서 두 경로가 동일한 표면 반응을 사용하도록 만드는 통제 단계이다.
 
-### 4.5.2 구현
+### 4.5.2 Legacy 재질 경로 진단
 
-공통 `PBR.hlsli`에 GGX normal distribution, Smith geometry term, Fresnel-Schlick 및 Cook-Torrance 평가 함수를 구성하였다. Raster pixel shader와 RT closest-hit shader는 동일한 base color, metallic, roughness 및 AO 값을 읽고 공통 `EvaluatePBR` 함수를 호출한다.
+초기 FlightHelmet 렌더링에서 금속과 가죽의 차이가 약하고 specular가 사실상 나타나지 않는 현상을 확인하였다. 이는 BRDF 자체보다 재질 데이터가 셰이더까지 전달되는 경로의 문제였다. H3D 재질은 BaseColor, Specular, Normal의 세 texture reference를 가지지만, 실제 FlightHelmet 자산은 두 번째 슬롯에 대응하는 legacy specular texture 대신 `*_OcclusionRoughMetal.dds`를 제공한다. 기존 loader는 이 파일명을 탐색하지 않아 두 번째 슬롯을 검은 fallback texture로 채웠다.
 
-Procedural surface는 material ID를 통해 동일한 재질을 선택하며, helmet 모델은 diffuse, normal 및 ORM texture를 사용한다. Metallic 표면이 직접광이 없는 영역에서 완전히 검게 보이지 않도록 ambient specular baseline을 제공하지만, 실험 모드에 따라 ambient 및 environment contribution을 구분한다.
+이 오류는 두 렌더링 경로에서 서로 다른 형태로 이어졌다. Raster 경로는 검은 두 번째 texture의 채널을 specular mask로 사용하여 specular 기여가 0이 되었고, RT 경로는 local root signature가 diffuse와 normal에 해당하는 `t6`, `t7`만 노출한 상태에서 hit shader의 specular mask도 0으로 고정되어 있었다. 따라서 초기 결과는 metallic, roughness 및 texture AO를 반영하지 못했으며, 모든 재질이 유사한 표면 반응을 보였다.
 
-### 4.5.3 발생 문제
+### 4.5.3 ORM 데이터 경로 복구
 
-PBR 통합 과정에서 ambient 값이 의도와 다르게 남아 조명 세기를 0으로 설정해도 장면이 밝게 보이는 문제가 발생하였다. 또한 raster와 RT 경로가 normal map, material fallback 및 emissive panel을 다르게 처리하면 같은 장면에서도 결과가 달라졌다.
+`ModelH3D::LoadTextures()`에 BaseColor 파일명으로부터 `*_OcclusionRoughMetal.dds`를 유도하는 fallback을 추가하였다. 복구된 ORM texture는 glTF 관례에 따라 R=AO, G=Roughness, B=Metallic으로 해석하였다. Raster pixel shader는 기존 `t1`에서 ORM을 읽으며, texture AO와 SSAO를 곱해 재질 내부 차폐와 화면 공간 차폐를 함께 반영한다.
 
-이 문제는 비교 연구에서 공통 shading 기준이 필수임을 보여준다. Visibility 방식만 비교하려면 ambient, emissive, material fallback 및 tone mapping이 결과에 미치는 영향을 먼저 통제해야 한다.
+RT 경로에서는 local descriptor range를 두 개에서 세 개로 확장하여 `t8`에 ORM을 추가하고, material descriptor table에도 diffuse, normal, ORM 순서로 SRV를 배치하였다. Descriptor table이 가리키는 descriptor 수가 증가하더라도 shader record에는 동일한 GPU descriptor handle 하나가 저장되지만, local root signature, shader table 구성 및 hit shader register 선언이 동시에 일치해야 한다. 이 과정은 같은 texture 자산을 사용하더라도 Raster와 RT의 resource binding 구조가 다르므로 한쪽 수정만으로는 동일한 재질 결과를 얻을 수 없음을 보여준다.
 
-### 4.5.4 비교 결과 해석
+### 4.5.4 공통 Cook-Torrance 평가
+
+공통 `PBR.hlsli`에 GGX normal distribution, Smith geometry term, Fresnel-Schlick 및 Cook-Torrance 평가 함수를 구성하였다. Raster pixel shader와 RT closest-hit shader는 각각의 visibility 결과를 구한 뒤 동일한 `EvaluatePBR` 함수를 호출한다. Metallic workflow에서는 diffuse 기여를 `baseColor * (1-metallic)`으로 억제하고, normal incidence reflectance인 F0를 `lerp(0.04, baseColor, metallic)`으로 계산한다. Roughness는 GGX 분포와 geometry term에 사용된다.
+
+Roughness가 0에 가까우면 GGX 분모가 매우 작아져 specular가 폭증할 수 있으므로 최소값 0.04와 분모 하한을 적용하였다. 또한 현재 diffuse 항은 기존 장면의 광원 세기를 유지하기 위해 Lambertian의 `1/PI` 정규화를 생략하였다. 따라서 본 구현은 metallic/roughness에 따른 상대적인 표면 반응과 Raster/RT 정합성을 제공하지만, 절대적인 radiometric calibration까지 완료한 참조 path tracer는 아니다.
+
+직접광이 없는 영역의 metallic 표면이 완전히 검게 되는 것을 막기 위해 `AmbientPBR`은 diffuse와 specular의 단색 ambient 기준값을 제공한다. 이는 완전한 image-based lighting이 아니라 실험 장면을 위한 placeholder이므로, visibility 비교에서는 ambient를 통제하고 environment lighting을 사용하는 후속 단계와 구분하였다.
+
+### 4.5.5 절차적 재질과 실험 모드 통제
+
+FlightHelmet은 BaseColor, Normal, ORM texture를 통해 재질 값을 얻고, Cornell 스타일의 절차적 표면은 material ID로 값을 선택한다. 두 데이터 경로는 다르지만, 공통 `ProceduralMaterial.hlsli`와 `PBR.hlsli`를 통해 Raster와 RT가 동일한 재질 파라미터와 BRDF 평가를 사용한다.
+
+최종 장면에서는 벽과 천장을 비금속 고 roughness 기준면으로 유지하고, 바닥과 Box A 및 Box B에는 reflection과 glossy reflection 실험을 위한 metallic 재질을 배치하였다. 반면 GI 비교 모드에서는 emissive panel을 제외한 재질의 metallic을 0으로 만들고 roughness를 최소 0.9로 높인다. 이는 초기 설계의 별도 mirror plate 제안이 이후 mirror box와 모드별 재질 정책으로 발전한 결과이며, reflection 실험과 diffuse GI 실험이 서로의 재질 조건을 오염시키지 않게 한다.
+
+### 4.5.6 디버그 뷰와 검증
+
+AO, Roughness, Metallic 및 world normal을 직접 출력하는 공통 debug view를 추가하였다. Metallic view에서 헬멧의 금속 부품은 밝고 가죽 부품은 어둡게 나타나야 하며, Roughness view에서는 표면별 광택 차이가 명확해야 한다. 이 검증은 최종 조명 결과만 보아서는 구분하기 어려운 ORM 채널 순서 오류와 texture loading 실패를 먼저 분리해 낸다.
+
+동일한 debug view에서도 Raster와 RT 결과가 다르면 ORM 채널보다 normal 변환, TBN 구성 또는 view direction 부호를 우선 확인해야 한다. 또한 검은 ORM fallback으로 AO가 0이 되는 경우를 막기 위한 최소 ambient guard는 안전장치일 뿐이며, 올바른 texture loading을 대신하지는 않는다.
+
+| 관찰 또는 문제 | 파이프라인 원인 | 반영한 해결 |
+|---|---|---|
+| Helmet의 specular가 사라지고 재질 차이가 약함 | ORM 파일을 찾지 못해 두 번째 material texture가 검은 fallback으로 대체됨 | BaseColor 이름으로부터 ORM 경로를 유도 |
+| RT에서 ORM을 사용할 수 없음 | Local root signature와 shader table이 diffuse/normal 두 SRV만 제공 | descriptor range를 세 개로 확장하고 `t8`에 ORM 바인딩 |
+| Raster와 RT의 표면 반응이 다름 | 각 경로의 재질 lookup과 lighting 함수가 분리됨 | 공통 procedural material table과 `EvaluatePBR` 사용 |
+| 낮은 roughness에서 과도한 highlight 가능 | GGX 분모의 수치 불안정 | roughness 및 분모 하한 적용 |
+| 최종 색만으로 오류 원인을 구분하기 어려움 | material data, normal 및 lighting 오류가 합성 결과에 함께 나타남 | AO/Roughness/Metallic/Normal debug view 추가 |
+
+### 4.5.7 비교 결과 해석
 
 Legacy lighting과 PBR의 차이는 본 논문의 최종 비교 대상이면서 동시에 실험 오염 요인이다. 따라서 Phase 4 이후에는 PBR을 공통 기준으로 사용하고, legacy 결과는 엔진 변경 전후의 shading 구조 차이를 설명하는 보조 실험으로 제시한다.
+
+이 단계의 핵심 결과는 PBR 수식을 추가했다는 사실보다, 재질 자산이 loader, descriptor, shader register 및 BRDF 평가를 거쳐 두 파이프라인에 동일하게 도달하도록 만든 것이다. 이후 shadow와 reflection 비교에서 나타나는 차이를 visibility 방식의 차이로 해석하려면 먼저 이러한 material 및 shading 조건이 통제되어야 한다.
 
 ## 4.6 Phase 5. Reflection: SSR vs Reflection Ray
 
@@ -644,6 +674,8 @@ RT는 근사 표현에서 누락된 월드 공간 정보를 복원하는 것이 
 ### 5.4.4 엔진 리소스 및 파이프라인
 
 - descriptor register 충돌
+- H3D loader가 ORM 파일명을 인식하지 못해 검은 fallback texture를 사용한 문제
+- RT local root signature와 shader table에 ORM SRV가 누락된 문제
 - UAV/SRV resource transition
 - shader payload 초기화
 - RTPSO recursion depth 제한
@@ -779,12 +811,14 @@ RT 1-SPP GI buffer
 2. Cornell 스타일 실험 장면과 오브젝트 배치 Top View
 3. Phase 2: Shadow caster culling, bias 변화 및 shadow ray TMin 접촉부 비교
 4. Phase 3: RT 4/16/64-ray grid, stochastic noise, rotated grid 및 PCSS over-blur 비교
-5. Phase 5: SSR screen-edge/off-screen/depth-discontinuity 대 reflection ray
-6. Phase 5: Reflection depth 1/2/4 비교
-7. Phase 6: Prefiltered environment map 대 RT glossy reflection
-8. Phase 7: Raster GI 대 RT 1/2-bounce color bleeding
-9. 구현 과정 bug 사례: seam, acne, peter-panning, ray epsilon light leak
-10. 향후 hybrid renderer 구조도
+5. Phase 4: Legacy 재질 경로와 PBR 전환 후 FlightHelmet 비교
+6. Phase 4: AO/Roughness/Metallic/Normal debug view의 Raster/RT 비교
+7. Phase 5: SSR screen-edge/off-screen/depth-discontinuity 대 reflection ray
+8. Phase 5: Reflection depth 1/2/4 비교
+9. Phase 6: Prefiltered environment map 대 RT glossy reflection
+10. Phase 7: Raster GI 대 RT 1/2-bounce color bleeding
+11. 구현 과정 bug 사례: seam, acne, peter-panning, ray epsilon light leak
+12. 향후 hybrid renderer 구조도
 
 ## 8.2 필수 표
 
@@ -813,6 +847,9 @@ RT 1-SPP GI buffer
 | RT Soft Shadow | 64-ray per-pixel rotated grid | 반복 경계가 감소한 안정적 penumbra | pixel별 grid 방향 decorrelation | 최종 RT soft shadow 설정 |
 | Raster PCSS | blocker/filter 각 64 samples | 거리별 penumbra | 평균 blocker 기반 가변 PCF 반경 | 단일 shadow map으로 plausible soft shadow |
 | Raster PCSS | filter 반경 과대 | over-blur와 둥근 shadow bleeding | 중심 shadow map과 heuristic 반경 추정 | 최대 반경 제한 필요 |
+| Legacy Material | FlightHelmet ORM 미로딩 | specular가 사라지고 금속/가죽 구분이 약함 | 검은 fallback texture와 비활성화된 RT specular | BRDF 이전에 material data path 검증 필요 |
+| PBR Debug View | AO/Roughness/Metallic/Normal | 채널별 재질 패턴과 Raster/RT 차이를 직접 확인 | 합성 lighting을 우회해 입력 데이터를 출력 | 재질 오류와 lighting 오류를 분리 가능 |
+| Shared PBR | 공통 ORM 및 Cook-Torrance | 두 경로에서 metallic/roughness 기반 표면 반응 | 공통 material table과 `EvaluatePBR` | 이후 visibility 비교의 shading 통제 조건 |
 | Raster SSR | fixed settings | off-screen 누락 | 현재 화면 color/depth만 조회 | 화면 밖 정보 복원 불가 |
 | RT Reflection | depth 1/2 | 단일/다중 반사 | TLAS 대상 월드 공간 재귀 ray query | 화면 밖 및 다중 반사 표현 |
 | Raster Glossy | roughness 0.3 | 안정적, parallax 오차 | 위치가 압축된 prefiltered cubemap | 안정성과 위치 정확도의 교환 |
