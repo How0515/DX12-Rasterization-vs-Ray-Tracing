@@ -52,6 +52,16 @@ namespace Sponza
     GraphicsPSO m_CutoutModelPSO = { (L"Sponza: Cutout Color PSO") };
     GraphicsPSO m_ShadowPSO(L"Sponza: Shadow PSO");
     GraphicsPSO m_CutoutShadowPSO(L"Sponza: Cutout Shadow PSO");
+    GraphicsPSO m_CubeCapturePSO(L"Sponza: Cube Capture PSO");
+    GraphicsPSO m_CutoutCubeCapturePSO(L"Sponza: Cutout Cube Capture PSO");
+
+    // Environment cubemap resources (one-time startup capture for raster IBL)
+    static const UINT          kEnvCubeSize = 128;
+    static ColorBuffer         g_EnvCubeBuffer;        // 128×128×6 texture array
+    static DepthBuffer         g_CubeCapDepth;         // 128×128 depth for cube capture
+    static D3D12_CPU_DESCRIPTOR_HANDLE g_CubeFaceRTV[6];
+    static D3D12_CPU_DESCRIPTOR_HANDLE g_EnvCubeSRV;
+    static bool                g_EnvCubeReady = false;
 
     ModelH3D m_Model;
     Matrix4 m_ModelTransform(kIdentity);
@@ -231,6 +241,50 @@ void Sponza::Startup( Camera& Camera )
     m_CutoutModelPSO = m_ModelPSO;
     m_CutoutModelPSO.SetRasterizerState(RasterizerTwoSided);
     m_CutoutModelPSO.Finalize();
+
+    // Cube capture PSO: single RTV + depth R/W in one pass (no separate Z-prepass).
+    // NumRenderTargets=1 → SV_Target1 (normal) is silently discarded, which is fine for IBL.
+    m_CubeCapturePSO = m_DepthPSO;
+    m_CubeCapturePSO.SetBlendState(BlendDisable);
+    m_CubeCapturePSO.SetDepthStencilState(DepthStateReadWrite);
+    m_CubeCapturePSO.SetRenderTargetFormats(1, &ColorFormat, DepthFormat);
+    m_CubeCapturePSO.SetVertexShader(g_pModelViewerVS, sizeof(g_pModelViewerVS));
+    m_CubeCapturePSO.SetPixelShader(g_pModelViewerPS, sizeof(g_pModelViewerPS));
+    m_CubeCapturePSO.Finalize();
+
+    m_CutoutCubeCapturePSO = m_CubeCapturePSO;
+    m_CutoutCubeCapturePSO.SetRasterizerState(RasterizerTwoSided);
+    m_CutoutCubeCapturePSO.Finalize();
+
+    // Environment cubemap: 128×128×6 texture array + shared depth buffer
+    g_EnvCubeBuffer.CreateArray(L"EnvCubeBuffer", kEnvCubeSize, kEnvCubeSize, 6, ColorFormat);
+    g_CubeCapDepth.Create(L"CubeCapDepth", kEnvCubeSize, kEnvCubeSize, DepthFormat);
+    {
+        ID3D12Resource* cubeRes = g_EnvCubeBuffer.GetResource();
+
+        for (UINT i = 0; i < 6; ++i)
+        {
+            g_CubeFaceRTV[i] = Graphics::AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+            D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+            rtvDesc.Format                         = ColorFormat;
+            rtvDesc.ViewDimension                  = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
+            rtvDesc.Texture2DArray.MipSlice        = 0;
+            rtvDesc.Texture2DArray.FirstArraySlice = i;
+            rtvDesc.Texture2DArray.ArraySize       = 1;
+            Graphics::g_Device->CreateRenderTargetView(cubeRes, &rtvDesc, g_CubeFaceRTV[i]);
+        }
+
+        // TextureCube SRV (samplers can use .SampleLevel on a TextureCube view)
+        g_EnvCubeSRV = Graphics::AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Format                          = ColorFormat;
+        srvDesc.ViewDimension                   = D3D12_SRV_DIMENSION_TEXTURECUBE;
+        srvDesc.Shader4ComponentMapping         = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.TextureCube.MostDetailedMip     = 0;
+        srvDesc.TextureCube.MipLevels           = 1;
+        srvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
+        Graphics::g_Device->CreateShaderResourceView(cubeRes, &srvDesc, g_EnvCubeSRV);
+    }
 
     ASSERT(m_Model.Load(L"FlightHelmet/FlightHelmet.h3d"), "Failed to load model");
     ASSERT(m_Model.GetMeshCount() > 0, "Model contains no meshes");
@@ -482,6 +536,9 @@ const ModelH3D& Sponza::GetModel()
 {
     return Sponza::m_Model;
 }
+
+D3D12_CPU_DESCRIPTOR_HANDLE Sponza::GetEnvCubeSRV()  { return g_EnvCubeSRV; }
+bool                        Sponza::IsEnvCubeReady()  { return g_EnvCubeReady; }
 
 void Sponza::Cleanup( void )
 {
@@ -768,6 +825,66 @@ void Sponza::RenderScene(
                 g_ShadowBuffer.EndRendering(gfxContext);
             }
         }
+    }
+
+    // One-time environment cubemap capture for raster IBL (128×128×6 faces).
+    // Runs on the first frame where the shadow map has been set up.
+    // Each face uses a 90° FOV Camera (reversed-Z, matching DepthStateReadWrite/GREATER_EQUAL).
+    if (!g_EnvCubeReady)
+    {
+        ScopedTimer _cubeProf(L"Env Cubemap Capture", gfxContext);
+
+        static const Vector3 kCapPos(0.0f, 0.70f, 0.0f);  // vertical center of Cornell Box
+        static const Vector3 kFaceLook[6] = {              // +X,-X,+Y,-Y,+Z,-Z (LH DX12 order)
+            Vector3( 1,0,0), Vector3(-1,0,0),
+            Vector3( 0,1,0), Vector3( 0,-1,0),
+            Vector3( 0,0,1), Vector3( 0,0,-1),
+        };
+        static const Vector3 kFaceUp[6] = {
+            Vector3(0,1,0), Vector3(0, 1,0),
+            Vector3(0,0,-1), Vector3(0,0,1),
+            Vector3(0,1,0), Vector3(0, 1,0),
+        };
+
+        const D3D12_VIEWPORT cubeVP   = { 0, 0, (float)kEnvCubeSize, (float)kEnvCubeSize, 0.0f, 1.0f };
+        const D3D12_RECT     cubeRect = { 0, 0, (LONG)kEnvCubeSize, (LONG)kEnvCubeSize };
+
+        gfxContext.TransitionResource(g_EnvCubeBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
+        gfxContext.TransitionResource(g_CubeCapDepth,  D3D12_RESOURCE_STATE_DEPTH_WRITE,   true);
+
+        pfnSetupGraphicsState();
+        gfxContext.SetDynamicConstantBufferView(Renderer::kMaterialConstants, sizeof(psConstants), &psConstants);
+        gfxContext.SetDescriptorTable(Renderer::kCommonSRVs, Renderer::m_CommonTextures);
+
+        for (UINT face = 0; face < 6; ++face)
+        {
+            Camera faceCam;  // m_ReverseZ = true by default; GREATER_EQUAL depth matches PSO
+            faceCam.SetEyeAtUp(kCapPos, kCapPos + kFaceLook[face], kFaceUp[face]);
+            faceCam.SetPerspectiveMatrix(XM_PIDIV2, 1.0f, 0.02f, 5.0f);
+            faceCam.Update();
+
+            gfxContext.ClearDepth(g_CubeCapDepth);
+            const float kBlack[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+            gfxContext.FlushResourceBarriers();
+            gfxContext.GetCommandList()->ClearRenderTargetView(g_CubeFaceRTV[face], kBlack, 0, nullptr);
+            gfxContext.SetRenderTarget(g_CubeFaceRTV[face], g_CubeCapDepth.GetDSV());
+            gfxContext.SetViewportAndScissor(cubeVP, cubeRect);
+
+            gfxContext.SetPipelineState(m_CubeCapturePSO);
+            RenderObjects(gfxContext, faceCam.GetViewProjMatrix(), kCapPos, kOpaque);
+            gfxContext.SetPipelineState(m_CutoutCubeCapturePSO);
+            RenderObjects(gfxContext, faceCam.GetViewProjMatrix(), kCapPos, kCutout);
+            gfxContext.SetPipelineState(m_CubeCapturePSO);
+            RenderProceduralSurfaces(gfxContext, true, false, faceCam.GetViewProjMatrix(), kCapPos);
+        }
+
+        gfxContext.TransitionResource(g_EnvCubeBuffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, true);
+        g_EnvCubeReady = true;
+
+        // Restore state for the main color pass that follows
+        pfnSetupGraphicsState();
+        gfxContext.SetDynamicConstantBufferView(Renderer::kMaterialConstants, sizeof(psConstants), &psConstants);
+        gfxContext.SetDescriptorTable(Renderer::kCommonSRVs, Renderer::m_CommonTextures);
     }
 
     if (!skipDiffusePass)
