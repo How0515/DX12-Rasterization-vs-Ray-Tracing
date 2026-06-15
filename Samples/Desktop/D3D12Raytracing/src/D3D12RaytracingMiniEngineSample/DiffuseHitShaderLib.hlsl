@@ -351,13 +351,15 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         {
             float3 reflDir;
             bool   doReflect;
-            if (roughness < kGlossyRoughnessThreshold)
+            if (!UseGlossyIS || roughness < kGlossyRoughnessThreshold)
             {
+                // Pure mirror — stable, no TAA noise (used by RTM_REFLECTIONS keys 6/7/8)
                 reflDir   = reflect(WorldRayDirection(), normal);
                 doReflect = true;
             }
             else
             {
+                // GGX IS — stochastic, TAA-blended (RTM_GLOSSY key 0 only)
                 uint   seed = MakeHaltonSeed(DispatchRaysIndex().xy, g_dynamic.frameIndex);
                 float2 Xi   = Halton2D(seed);
                 float3 H    = ImportanceSampleGGX(Xi, roughness, normal);
@@ -526,13 +528,15 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
     {
         float3 reflDir;
         bool   doReflect;
-        if (roughness < kGlossyRoughnessThreshold)
+        if (!UseGlossyIS || roughness < kGlossyRoughnessThreshold)
         {
+            // Pure mirror — stable, no TAA noise (used by RTM_REFLECTIONS keys 6/7/8)
             reflDir   = reflect(WorldRayDirection(), normal);
             doReflect = true;
         }
         else
         {
+            // GGX IS — stochastic, TAA-blended (RTM_GLOSSY key 0 only)
             uint   seed = MakeHaltonSeed(DispatchRaysIndex().xy, g_dynamic.frameIndex);
             float2 Xi   = Halton2D(seed);
             float3 H    = ImportanceSampleGGX(Xi, roughness, normal);

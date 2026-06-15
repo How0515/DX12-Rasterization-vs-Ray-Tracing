@@ -47,7 +47,8 @@ cbuffer HitShaderConstants : register(b0)
     float4 PointLightPos;    // xyz = world position, w = unused
     float4 PointLightColor;  // xyz = radiance, w = unused
     float  BoxARoughness;    // runtime roughness for Box A (matID 104); Box B stays at 0.02
-    float3 _boxARPad;
+    uint   UseGlossyIS;      // 1 = GGX IS for rough surfaces (RTM_GLOSSY only); 0 = pure mirror
+    float2 _boxARPad;
 }
 
 cbuffer b1 : register(b1)

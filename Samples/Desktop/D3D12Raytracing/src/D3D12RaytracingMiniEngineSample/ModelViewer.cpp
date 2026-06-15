@@ -73,7 +73,8 @@ __declspec(align(16)) struct HitShaderConstants
     Vector3 pointLightPos;
     Vector3 pointLightColor;
     float   boxARoughness;
-    float   _pad[3];
+    UINT32  useGlossyIS;  // 1 = GGX IS for rough metallic (RTM_GLOSSY); 0 = pure mirror
+    float   _pad[2];
 };
 
 ByteAddressBuffer          g_hitConstantBuffer;
@@ -1403,14 +1404,17 @@ void D3D12RaytracingMiniEngineSample::RaytraceDiffuse(
     hitShaderConstants.modelToShadow = Transpose(Sponza::m_SunShadow.GetShadowMatrix());
     hitShaderConstants.IsReflection = false;
     hitShaderConstants.UseShadowRays = (rayTracingMode == RTM_DIFFUSE_WITH_SHADOWRAYS) ||
-                                        (rayTracingMode == RTM_REFLECTIONS);
+                                        (rayTracingMode == RTM_REFLECTIONS) ||
+                                        (rayTracingMode == RTM_GLOSSY);
     static const UINT kReflDepthMap[] = { 0, 1, 2, 4 };
-    hitShaderConstants.MaxRecursionDepth = (rayTracingMode == RTM_REFLECTIONS) ?
-                                            kReflDepthMap[(int)g_MaxRecursionDepth] : 0;
+    hitShaderConstants.MaxRecursionDepth =
+        (rayTracingMode == RTM_REFLECTIONS || rayTracingMode == RTM_GLOSSY) ?
+        kReflDepthMap[(int)g_MaxRecursionDepth] : 0;
     hitShaderConstants.pointLightPos   = Sponza::m_PointLightPos;
     hitShaderConstants.pointLightColor = Sponza::m_PointLightColor;
     hitShaderConstants.debugView       = (UINT32)(int)g_DebugView;
     hitShaderConstants.boxARoughness   = (float)Sponza::m_BoxARoughness;
+    hitShaderConstants.useGlossyIS     = (rayTracingMode == RTM_GLOSSY) ? 1u : 0u;
     context.WriteBuffer(g_hitConstantBuffer, 0, &hitShaderConstants, sizeof(hitShaderConstants));
     context.WriteBuffer(g_dynamicConstantBuffer, 0, &inputs, sizeof(inputs));
 
@@ -1471,6 +1475,7 @@ void D3D12RaytracingMiniEngineSample::RaytraceReflections(
     hitShaderConstants.pointLightColor = Sponza::m_PointLightColor;
     hitShaderConstants.debugView       = (UINT32)(int)g_DebugView;
     hitShaderConstants.boxARoughness   = (float)Sponza::m_BoxARoughness;
+    hitShaderConstants.useGlossyIS     = 0u;  // reflection sub-pass always uses mirror
     context.WriteBuffer(g_hitConstantBuffer, 0, &hitShaderConstants, sizeof(hitShaderConstants));
     context.WriteBuffer(g_dynamicConstantBuffer, 0, &inputs, sizeof(inputs));
 
