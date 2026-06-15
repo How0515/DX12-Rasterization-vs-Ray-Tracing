@@ -642,11 +642,15 @@ Prefiltered environment map은 radiance 적분 결과를 사전에 방향별 tex
 
 ### 4.8.1 실험 목적
 
-Phase 7에서는 직접광 이후의 diffuse 간접광을 비교한다. Raster baseline은 prefiltered environment cubemap의 낮은 주파수 정보를 사용하고, RT 경로는 cosine-weighted diffuse secondary ray와 재귀 깊이 제어를 사용하여 1-bounce 및 2-bounce 결과를 생성한다.
+Phase 7에서는 직접광 이후의 diffuse 간접광을 비교한다. Raster baseline(H)은 environment cubemap의 최고 mip level에서 surface normal 방향의 irradiance를 근사하고, RT 1-bounce(G)는 diffuse secondary ray로 실제 hit radiance를 샘플링하며, RT 2-bounce(J)는 secondary hit에서 추가 bounce를 생성한다.
+
+GI 비교에서 재질 차이가 결과를 오염시키지 않도록 H/G/J 활성화 시 면광원 패널을 제외한 모든 비발광 재질의 metallic을 0으로, roughness를 최소 0.9로 강제 설정한다. 이를 통해 바닥과 박스의 거울 반사를 제거하고, 세 모드의 차이를 환경 기반 간접광 근사와 diffuse secondary ray의 구조 차이로 한정한다. TAA는 확률적 RT GI(G, J)에서만 활성화하고, deterministic한 Raster GI(H)와 mirror 모드에서는 비활성화한다.
 
 ### 4.8.2 Raster GI 경로
 
-Raster GI 경로는 surface normal 방향으로 environment cubemap의 높은 mip level을 조회하여 diffuse irradiance를 근사한다. 이 방식은 안정적이고 저렴하지만, 위치 정보를 거의 사용하지 않기 때문에 같은 normal을 가진 서로 다른 위치가 유사한 간접광을 받을 수 있다. 벽 근처의 color bleeding, 물체 뒤의 차폐 및 국소적인 간접광 변화 표현에는 한계가 있다.
+Raster GI 경로는 surface normal 방향으로 Phase 6에서 구성한 `g_PrefilteredEnv`의 최고 mip level(mip 6, roughness=1.0에 해당)을 조회하여 diffuse irradiance를 근사한다. 최고 mip는 GGX lobe가 반구 전체에 걸쳐 적분된 상태이므로 방향별 저주파 radiance 분포를 제공하며, 이를 surface normal 방향에서 읽으면 해당 법선을 가진 표면이 받는 평균적인 환경 조도가 된다.
+
+이 방식은 texture lookup 1회로 간접광을 근사하므로 비용이 매우 낮고 프레임 간 완전히 안정적이다. 그러나 조회 시 surface normal만 사용하므로 shading point의 위치 정보가 완전히 배제된다. 따라서 같은 normal을 가진 서로 다른 위치의 표면이 장면 내 어느 곳에 있든 동일한 irradiance를 받는다. 이 구조적 특성으로 인해 벽 근처 color bleeding, 물체 뒤의 차폐, 국소적 간접광 변화는 표현할 수 없다. TAA는 결과가 deterministic하므로 비활성화한다.
 
 ### 4.8.3 RT GI 경로
 
@@ -656,17 +660,35 @@ RT GI 경로는 diffuse 표면에서 cosine-weighted hemisphere 방향을 생성
 
 절차적 diffuse 표면은 1-bounce와 2-bounce를 지원하지만 textured mesh의 GI 경로는 1-bounce로 제한된다. 또한 multiple importance sampling과 production 수준 denoiser는 포함하지 않는다. 정적 카메라에서는 매 frame 다른 cosine-weighted 방향을 선택하고 TAA로 누적하여 경향을 확인할 수 있지만, 낮은 sample 수에서는 noise가 남는다.
 
-### 4.8.4 비교 결과 해석
+### 4.8.4 발생 문제
+
+GI 구현 과정에서 발생한 문제와 조치는 다음과 같다.
+
+| 발생 조건 | 관찰 현상 | 파이프라인 원인 | 조치 |
+|---|---|---|---|
+| J 초기 실험에서 바닥·Box B에 metallic 재질 잔류 | G보다 mirror-in-mirror가 더 뚜렷하게 관찰됨 | metallic 표면의 reflection 경로가 GI 결과와 혼재 | H/G/J 모드 진입 시 비발광 재질 metallic=0, roughness≥0.9로 강제 |
+| Secondary payload의 recursion depth 전달 오류 | G와 J의 재귀 깊이가 의도와 다르게 동작 | 두 번째 hit shader에서 depth 카운터가 올바르게 증가하지 않음 | payload 내 depth 필드 전달 로직 수정 |
+| Raster GI(H)에 TAA 활성화 | 정적 화면에서 ghosting 또는 blur 발생 | deterministic 결과에 불필요한 temporal blending | H 모드에서 TAA 비활성화 |
+| 1 spp GI ray와 64개 shadow ray 역할 혼동 | GI ray 수를 64개로 오해하여 비용 계산 오류 | shadow ray(면광원 가시성)와 GI continuation ray(간접광 경로)가 다른 목적 | 역할 분리 명확화: GI continuation ray는 hit마다 1개 |
+| 2-bounce hit에서 RTPSO 재귀 한도 초과 위험 | 재귀 최대 깊이 설정 오류 시 런타임 오류 | RTPSO MaxTraceRecursionDepth < 실제 재귀 깊이 | MaxTraceRecursionDepth를 GI depth+shadow ray depth 합산 기준으로 설정; 2-bounce hit에서 shadow ray 생략으로 한도 내 유지 |
+
+### 4.8.5 비교 결과 해석
+
+GI 실험에서 관찰한 H/G/J 비교는 다음과 같다.
+
+| 실험 조건 | 관찰 현상 | 파이프라인 원인 | 비고 |
+|---|---|---|---|
+| H (Raster GI, environment irradiance) | 색 벽 영향이 장면 전체에 균일하게 퍼짐 | normal 방향 최고 mip 조회, 위치 정보 없음 | color bleeding처럼 보이나 저주파 색조에 가까움 |
+| G (RT GI 1-bounce) 누적 전 | 강한 noise로 국소 색 변화 판독 어려움 | 1 spp/frame cosine-weighted secondary ray의 높은 variance | 누적 frame이 충분해야 경향 확인 가능 |
+| G vs H 비교 (충분한 누적 후) | G가 H보다 벽과 표면 사이 국소 색 변화가 더 위치에 의존적 | G는 실제 secondary hit radiance 사용, H는 방향별 평균 | 위치 종속 간접광 구조 확인 |
+| J (RT GI 2-bounce) vs G | 추가 diffuse bounce로 인한 차이, noise로 판독 어려움 | bounce마다 분산 누적, 1 spp/frame으로 수렴 느림 | 파이프라인 구조 확인에는 유효, 화질 입증용 영상으로는 부족 |
+| J 초기 실험 (재질 통제 전) | G보다 mirror-in-mirror가 더 뚜렷 | GI 장면에 잔류한 metallic 바닥·Box B의 reflection 교란 | 재질 통제 후 제거, GI 실험 재진행 |
 
 Environment 기반 GI는 위치 종속성을 제거하여 매우 압축된 형태의 간접광을 제공한다. RT GI는 실제 secondary visibility와 hit radiance를 사용하여 위치별 색 번짐과 차폐를 표현할 수 있다. 그러나 GI는 shadow나 mirror reflection보다 적분 차원이 높기 때문에 RT 비용과 noise 문제가 가장 크게 나타나는 단계이다.
 
-실제 관찰에서 H는 색 벽의 영향이 장면 전체에 비교적 균일하게 퍼져 color bleeding처럼 보였지만, 이는 특정 벽과 표면 사이의 실제 전달 경로를 구분한 결과라기보다 environment irradiance가 제공하는 저주파 색조에 가깝다. G와 J는 국소 위치에 따른 색 번짐을 표현할 수 있으나 1 spp/frame의 강한 noise 때문에 누적 전 화면에서는 차이를 판독하기 어려웠다.
+재질 통제 이후에도 RT GI의 높은 sampling variance로 인해 G와 J의 국소 색 번짐 및 bounce 차이를 안정적으로 판독하기 어려웠다. 현재 결과는 RT GI가 위치 종속 간접광을 계산할 수 있다는 파이프라인 구조와 noise 발생 원인을 확인하는 데에는 유효하지만, 1-bounce와 2-bounce의 화질 차이를 최종적으로 입증하는 수렴 영상으로 사용하기에는 부족하다. 이 관찰 한계 자체를 1 spp 실시간 RT와 후처리 의존성의 사례로 기록하고, 더 높은 SPP 또는 GI 전용 denoising은 후속 연구로 남긴다.
 
-초기 J 실험에서는 G보다 거울 안의 거울이 더 보이는 현상이 관찰되었다. 그러나 이는 2-bounce diffuse GI의 증거가 아니라 GI 장면에 남아 있던 metallic 바닥과 Box B가 reflection 경로를 생성한 교란 요인이었다. 이후 H/G/J 모두의 비발광 재질을 rough diffuse로 통일하여 거울 반사를 제거하였다. 따라서 수정 후 J의 관찰 대상은 mirror-in-mirror가 아니라 G에 비해 추가된 두 번째 diffuse bounce가 만드는 간접광 전달 범위와 국소 색 변화이다.
-
-그러나 재질 통제 이후에도 RT GI의 높은 sampling variance로 인해 G와 J의 국소 색 번짐 및 bounce 차이를 안정적으로 판독하기 어려웠다. 현재 결과는 RT GI가 위치 종속 간접광을 계산할 수 있다는 파이프라인 구조와 noise 발생 원인을 확인하는 데에는 유효하지만, 1-bounce와 2-bounce의 화질 차이를 최종적으로 입증하는 수렴 영상으로 사용하기에는 부족하다. 이 관찰 한계 자체를 1 spp 실시간 RT와 후처리 의존성의 사례로 기록하고, 더 높은 SPP 또는 GI 전용 denoising은 후속 연구로 남긴다.
-
-### 4.8.5 결과 작성용 문장
+### 4.8.6 결과 작성용 문장
 
 > Environment irradiance 기반 raster GI는 안정적인 저주파 간접광을 제공하였으나, 위치별 차폐와 색 번짐을 구분하지 못하였다. Diffuse secondary ray는 실제 hit 위치와 재귀 경로를 사용하므로 위치 종속 color bleeding과 추가 bounce를 계산할 수 있지만, 본 구현의 1 spp/frame 결과에서는 높은 variance가 해당 차이를 가렸다. 따라서 현재 실험은 GI 질의 구조의 차이와 시간 누적의 필요성을 확인하였으며, 수렴된 1/2-bounce 화질 비교는 다중 sample 또는 denoising을 요구하는 후속 과제로 남는다.
 
@@ -886,9 +908,10 @@ RT 1-SPP GI buffer
 8. Phase 5: Reflection Depth 2/3/5 비교 — 반사 체인 진행 단계별 캡처
 9. Phase 6: Raster PEM vs RT Glossy roughness sweep (0.0/0.17/0.33/0.60/1.00) 비교
 10. Phase 6: Box B 반사면에서 Box A parallax 오차 — PEM 누락 vs RT 위치 정확 반사
-11. Phase 7: Raster GI 대 RT 1/2-bounce color bleeding
-12. 구현 과정 bug 사례: seam, acne, peter-panning, ray epsilon light leak
-13. 향후 hybrid renderer 구조도
+11. Phase 7: H(Raster GI) vs G(RT 1-bounce) vs J(RT 2-bounce) — 공통 diffuse 재질 기준 color bleeding 비교
+12. Phase 7: G/J noise 누적 경과 — TAA frame 수에 따른 variance 감소 관찰
+13. 구현 과정 bug 사례: seam, acne, peter-panning, ray epsilon light leak
+14. 향후 hybrid renderer 구조도
 
 ## 8.2 필수 표
 
