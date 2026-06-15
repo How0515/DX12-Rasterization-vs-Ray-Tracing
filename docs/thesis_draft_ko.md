@@ -399,27 +399,54 @@ Shadow map의 오차는 광원 시점의 depth texture와 rasterizer 상태가 �
 
 Phase 3에서는 면광원에 의해 생성되는 soft shadow를 비교한다. Raster 경로는 PCSS를 사용하고, RT 경로는 면광원 위의 여러 위치로 shadow ray를 발사한다.
 
+실험 장면은 천장 면광원이 lit 영역, 완전히 가려진 umbra, 광원의 일부만 보이는 penumbra가 한 화면에서 드러나도록 카메라와 차폐물 위치를 조정하였다. 이 과정에서 조명과 무관한 ambient 성분이 남아 있으면 그림자 대비를 판독하기 어려웠으므로 directional/ambient 기여를 최소화하고, visible emissive panel과 실제 면광원 중심의 높이를 동일하게 맞췄다. 패널은 광원의 시각적 표현이며, 실제 직접광과 shadow 계산은 패널 중심 주변의 별도 sample 위치를 사용한다.
+
+Ambient를 0으로 설정했는데도 장면이 밝게 보이는 문제는 MiniEngine의 `ExpVar` 동작과 관련되어 있었다. `ExpVar`는 입력값의 `log2`를 지정 범위로 제한한 뒤 읽을 때 `exp2`를 반환한다. 따라서 최소 지수값이 0이면 실제 최소값은 `exp2(0)=1`이며 완전히 끌 수 없다. Ambient 최소 지수 범위를 -16으로 변경하면 0 입력은 약 `2^-16` 수준으로 낮아져 그림자 비교에 미치는 영향을 사실상 제거할 수 있었다. 이 문제는 렌더링 artifact처럼 보이는 현상이 실제로는 엔진 tuning variable의 값 표현 방식에서 발생할 수 있음을 보여준다.
+
 ### 4.4.2 PCSS 구현
 
-현재 PCSS 구현은 8×8 고정 grid를 disk 형태로 변환하여 blocker search와 filtering에 각각 사용한다. 먼저 shadow map에서 receiver보다 광원에 가까운 blocker를 탐색하고 평균 blocker 거리를 계산한다. 이후 receiver와 blocker 거리 차이로 penumbra ratio를 추정하고, 제한된 filter radius로 percentage-closer filtering을 수행한다.
+Raster 경로에서는 방향광 기반 직교 shadow camera 대신 천장 면광원 중심에 원근 shadow camera를 배치하였다. 면광원의 모든 위치를 하나의 shadow map에 직접 저장할 수는 없으므로, 광원 중심에서 생성한 단일 shadow map을 기준으로 penumbra를 근사한다.
 
-PCSS는 단일 shadow map만으로 접촉부에서 날카롭고 멀어질수록 부드러운 그림자를 표현할 수 있다. 그러나 blocker search 영역에 실제 차폐물이 충분히 포함되지 않거나 filter radius가 과도하게 증가하면 그림자가 실제보다 넓게 퍼지는 over-blur가 발생한다. 또한 shadow map 자체의 bias 및 해상도 오차를 그대로 상속한다.
+현재 PCSS 구현은 8×8 고정 grid를 disk 형태로 변환하여 blocker search와 filtering에 각각 64개 sample을 사용한다. 먼저 shadow map 주변에서 receiver보다 광원에 가까운 blocker를 탐색하고 평균 blocker 거리를 계산한다. 이후 receiver와 blocker 거리 차이로 penumbra ratio를 추정하고, 그 결과에 따라 PCF filter 반경을 동적으로 조절한다.
+
+PCF와 PCSS의 역할은 구분할 필요가 있다. PCF는 고정된 filter 반경에서 여러 depth comparison 결과를 평균하여 hard shadow 경계를 부드럽게 보이게 한다. 반면 PCSS는 blocker 거리를 이용하여 filter 반경 자체를 변화시키므로 접촉부는 날카롭고 멀어질수록 넓어지는 physically plausible penumbra를 근사한다. 즉 PCF는 PCSS의 마지막 filtering 단계로 사용되며, PCSS의 거리 기반 penumbra 추정을 단독으로 제공하지는 않는다.
+
+PCSS는 단일 shadow map만으로 접촉부에서 날카롭고 멀어질수록 부드러운 그림자를 표현할 수 있었다. 그러나 광원 중심 시점의 shadow map 하나만 사용하므로, 광원 전체에서의 실제 가시성을 직접 계산하지 않는다. Raster 직접광은 면광원 주변의 4개 대표 위치를 평가하지만, 그림자 visibility는 중심 shadow map에서 계산한 하나의 PCSS 값을 공유한다. 따라서 PCSS/PCF sample 수를 16에서 64로 늘리면 filter의 이산성은 감소하지만, 중심 투영에서 비롯된 과도한 암부와 형태 오차는 제거되지 않았다.
+
+초기 구현에서는 평균 blocker와 원형 filter의 반경이 과도하게 증가하여 penumbra가 실제보다 넓어지고 그림자 외곽이 둥글게 팽창하는 over-blur 또는 shadow bleeding이 관찰되었다. 이를 완화하기 위해 blocker와 receiver의 최소 분리 거리를 적용하고, 최종 filter 반경을 blocker search 범위와 최대 PCSS 반경 안으로 제한하였다. PCSS는 이러한 안정화 이후에도 shadow map의 bias, 해상도 및 중심 투영 오차를 상속한다.
 
 ### 4.4.3 RT 면광원 샘플링 구현
 
-RT 경로는 면광원을 8×8 grid, 총 64개 위치로 샘플링한다. 각 pixel은 hash로 생성한 회전값을 grid에 적용하여 고정 grid pattern을 완화한다. 각 광원 sample 위치까지 shadow ray를 발사하고, 보이는 sample의 비율을 visibility로 사용한다.
+RT 경로는 hit point에서 면광원 영역의 여러 위치까지 shadow ray를 발사하고, 보이는 sample의 비율을 visibility로 사용한다. 이 값이 0이면 umbra, 1이면 완전한 lit 영역이며, 그 사이 값은 광원의 일부만 보이는 penumbra를 나타낸다.
 
-이 방식은 실제 면광원 면적 중 가시적인 영역의 비율을 근사하므로 차폐물과 receiver의 기하 관계에 따라 penumbra가 형성된다. 반면 64개의 shadow ray가 필요하며, sample 수가 적거나 회전 패턴이 부적절하면 banding, noise 또는 temporal jitter가 나타날 수 있다.
+샘플링 방식은 4-ray 고정 grid에서 시작하였다. 4개 sample의 평균은 visibility가 0, 0.25, 0.5, 0.75, 1의 다섯 단계로만 표현되어 penumbra는 나타났지만 부드럽지 않았다. 16개와 64개로 증가하면 단계 수는 늘었지만, 모든 pixel이 정렬된 동일 grid를 사용하여 그림자 경계에 coherent band와 grid pattern이 나타났다.
+
+이를 줄이기 위해 최종 구현은 각 pixel 위치를 hash하여 얻은 각도로 8×8 고정 grid를 회전한다. 회전된 sample은 사각형 광원 영역 내부로 다시 배치하며, 총 64개의 shadow ray를 발사한다. 픽셀별 회전은 sample 수를 증가시키지 않고 공간적으로 반복되는 경계선을 분산시켰다. 완전한 stochastic sample도 실험하였으나 전형적인 고주파 noise와 temporal jitter가 크게 나타나, 안정적인 비교 이미지를 위해 per-pixel rotated fixed grid로 되돌렸다.
+
+RT 방식은 실제 면광원 sample 위치 각각에 대한 visibility를 직접 검사하므로 차폐물과 receiver의 기하 관계에 따른 penumbra를 생성한다. 반면 pixel당 64개의 traversal이 필요하며, 유한 sample에 의한 양자화 또는 pattern을 완전히 제거하지는 못한다.
 
 ### 4.4.4 비교 결과 해석
 
-PCSS의 soft shadow는 blocker 거리로 filter 크기를 추정한 결과이며, 광원 면적의 가시성을 직접 계산한 결과가 아니다. 따라서 PCSS의 penumbra는 plausible approximation이지만, 복잡한 blocker와 큰 광원에서 실제 형태와 달라질 수 있다.
+Soft shadow 실험의 단계별 관찰 결과는 다음과 같다.
 
-RT 면광원 sampling은 가시성 적분 자체를 근사한다. Sample 수가 충분할수록 실제 soft shadow에 접근하지만, 비용과 variance가 증가한다. 이 비교는 래스터 근사의 오차와 RT 샘플링 오차가 서로 다른 성격을 가짐을 보여준다. PCSS의 오차는 주로 정보 표현과 heuristic에서 발생하고, RT의 오차는 유한 sample에 의한 분산에서 발생한다.
+| 실험 조건 | 관찰 현상 | 원인 및 해석 |
+|---|---|---|
+| Ambient 최소 지수 0 | 조명 세기를 0으로 설정해도 장면이 밝음 | `ExpVar`의 실제 최소값이 1로 제한됨 |
+| Emissive panel과 광원 높이 불일치 | 패널 색과 조명 위치가 시각적으로 어긋남 | 보이는 발광체와 실제 sample 중심이 다름 |
+| RT 4-ray fixed grid | 다섯 단계의 거친 penumbra | 보이는 광원 sample 수가 0~4로 양자화됨 |
+| RT 16/64-ray fixed grid | 경계선 및 grid pattern | 정렬된 sample pattern이 공간적으로 반복됨 |
+| RT per-pixel rotated 64-ray grid | 반복 경계 감소, 비교적 안정된 penumbra | pixel별 sample 방향 decorrelation |
+| RT stochastic sampling | 고주파 noise와 temporal jitter | 무작위 sample의 높은 variance |
+| PCSS 64+64 samples | 접촉부에서 날카롭고 멀수록 부드러운 경계 | blocker 거리 기반 가변 PCF 반경 |
+| PCSS filter 반경 과대 | over-blur, shadow bleeding, 둥근 팽창 | 단일 중심 shadow map과 평균 blocker 기반 반경 추정 |
+
+PCSS의 soft shadow는 blocker 거리로 filter 크기를 추정한 결과이며, 광원 면적의 가시성을 직접 계산한 결과가 아니다. 따라서 낮은 비용으로 plausible penumbra를 생성하지만, 중심 shadow camera에서 보이지 않는 정보와 복잡한 blocker 구성을 복원할 수 없으며 실제 면광원보다 그림자가 과도하게 확장될 수 있다.
+
+RT 면광원 sampling은 광원 표면의 visibility 적분 자체를 유한 sample로 근사한다. Sample 수가 충분할수록 실제 soft shadow에 접근하지만, 비용과 variance가 증가한다. 이 비교는 래스터 근사의 오차와 RT 샘플링 오차가 서로 다른 성격을 가짐을 보여준다. PCSS의 오차는 단일 shadow map 표현과 heuristic penumbra 계산에서 발생하고, RT의 오차는 유한 sample의 양자화, pattern 및 variance에서 발생한다.
 
 ### 4.4.5 결과 작성용 문장
 
-> PCSS는 단일 shadow map의 blocker depth를 이용하여 penumbra 크기를 추정하므로 낮은 비용으로 부드러운 그림자를 생성했지만, blocker search 실패와 filter radius 제한에 따라 over-blur 또는 불연속 경계가 나타났다. 반면 면광원 영역에 대한 64개의 shadow ray는 실제 가시 면적을 평균하여 기하적으로 자연스러운 penumbra를 생성했으나, 광선 수 증가와 sampling pattern 관리가 필요하였다.
+> PCSS는 광원 중심에서 생성한 단일 shadow map의 blocker depth를 이용하여 PCF 반경을 동적으로 조절함으로써 접촉부는 날카롭고 멀어질수록 부드러운 penumbra를 근사하였다. 그러나 평균 blocker와 제한된 투영 정보로 인해 그림자가 실제보다 넓고 둥글게 팽창하는 over-blur가 발생할 수 있었다. 반면 면광원 영역에 대한 64개의 shadow ray는 실제 가시 sample 비율을 계산하여 기하 관계에 따른 penumbra를 생성했으나, 고정 grid에서는 반복 경계가, stochastic sample에서는 noise가 나타나 최종적으로 per-pixel rotated grid를 사용하였다.
 
 ## 4.5 Phase 4. PBR Lighting: Legacy Lighting vs PBR
 
@@ -622,6 +649,7 @@ RT는 근사 표현에서 누락된 월드 공간 정보를 복원하는 것이 
 - RTPSO recursion depth 제한
 - GI secondary payload의 recursion depth 전달 오류
 - raster/RT material 및 emissive 처리 불일치
+- `ExpVar`의 지수 범위 설정으로 인해 ambient가 완전히 꺼지지 않은 문제
 
 이러한 문제는 최종 이미지 품질뿐 아니라 두 렌더링 방식의 내부 구조를 이해하는 학습 과정 자체가 연구 결과임을 보여준다.
 
@@ -750,7 +778,7 @@ RT 1-SPP GI buffer
 1. 전체 시스템 구조도: Raster pipeline, DXR pipeline, 공유 scene/material/light data
 2. Cornell 스타일 실험 장면과 오브젝트 배치 Top View
 3. Phase 2: Shadow caster culling, bias 변화 및 shadow ray TMin 접촉부 비교
-4. Phase 3: PCSS over-blur 대 64-ray area-light soft shadow
+4. Phase 3: RT 4/16/64-ray grid, stochastic noise, rotated grid 및 PCSS over-blur 비교
 5. Phase 5: SSR screen-edge/off-screen/depth-discontinuity 대 reflection ray
 6. Phase 5: Reflection depth 1/2/4 비교
 7. Phase 6: Prefiltered environment map 대 RT glossy reflection
@@ -779,7 +807,12 @@ RT 1-SPP GI buffer
 | RT Shadow | 1 ray | hard shadow | 광원 중심 한 점에 대한 visibility query | 정확한 접촉부, 면광원 penumbra 없음 |
 | RT Shadow | `TMin=0.1` | 접촉부 흰 틈 | 가까운 occluder를 ray 시작 구간에서 건너뜀 | 작은 공통 epsilon 필요 |
 | RT Shadow | epsilon `1e-5` | 접촉부 visibility 복원 | 실제 geometry 교차 검사 | 본 장면에서 안정적인 hard shadow |
-| RT Shadow | 64 rays | soft shadow | 면광원 영역에 대한 다중 visibility query | 위치별 penumbra 표현 |
+| RT Soft Shadow | 4-ray fixed grid | 다섯 단계의 거친 penumbra | 가시 sample 수의 양자화 | sample 수 부족 |
+| RT Soft Shadow | 16/64-ray fixed grid | 반복 경계와 grid pattern | 정렬된 sample 위치의 공간적 반복 | sample 수만으로 pattern 해결 불가 |
+| RT Soft Shadow | 64-ray stochastic | 고주파 noise와 temporal jitter | 무작위 sample variance | 누적 또는 denoising 필요 |
+| RT Soft Shadow | 64-ray per-pixel rotated grid | 반복 경계가 감소한 안정적 penumbra | pixel별 grid 방향 decorrelation | 최종 RT soft shadow 설정 |
+| Raster PCSS | blocker/filter 각 64 samples | 거리별 penumbra | 평균 blocker 기반 가변 PCF 반경 | 단일 shadow map으로 plausible soft shadow |
+| Raster PCSS | filter 반경 과대 | over-blur와 둥근 shadow bleeding | 중심 shadow map과 heuristic 반경 추정 | 최대 반경 제한 필요 |
 | Raster SSR | fixed settings | off-screen 누락 | 현재 화면 color/depth만 조회 | 화면 밖 정보 복원 불가 |
 | RT Reflection | depth 1/2 | 단일/다중 반사 | TLAS 대상 월드 공간 재귀 ray query | 화면 밖 및 다중 반사 표현 |
 | Raster Glossy | roughness 0.3 | 안정적, parallax 오차 | 위치가 압축된 prefiltered cubemap | 안정성과 위치 정확도의 교환 |
