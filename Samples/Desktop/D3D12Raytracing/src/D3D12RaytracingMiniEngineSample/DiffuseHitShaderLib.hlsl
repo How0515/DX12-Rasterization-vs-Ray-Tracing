@@ -523,6 +523,12 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
     float  ao            = ormSample.r;
     float  roughness     = ormSample.g;
     float  metallic      = ormSample.b;
+    if (GIScene)
+    {
+        metallic  = 0.0f;
+        roughness = max(roughness, 0.90f);
+    }
+
     float3 specularAlbedo = lerp(float3(0.04, 0.04, 0.04), diffuseColor, metallic); // F0
     float3 diffuseContrib = diffuseColor * (1.0 - metallic);
 

@@ -75,6 +75,13 @@ MRT main(VSOutput vsOutput)
         metallic            = ormSample.b;
     }
 
+    // Match the RT GI diagnostic scene: remove mirror-like transport.
+    if (GIScene)
+    {
+        metallic  = 0.0f;
+        roughness = max(roughness, 0.90f);
+    }
+
     float3 specularAlbedo = lerp(float3(0.04, 0.04, 0.04), diffuseAlbedo, metallic); // F0
     float3 diffuseContrib = diffuseAlbedo * (1.0 - metallic);
 
