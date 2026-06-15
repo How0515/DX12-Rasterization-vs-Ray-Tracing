@@ -85,8 +85,9 @@ namespace Sponza
     Vector3  m_PointLightPos;
     Vector3  m_PointLightColor;
     uint32_t m_DebugView = 0;
-    uint32_t m_GlossyIBLEnabled = 0;
-    uint32_t m_GIScene          = 0;
+    uint32_t m_GlossyIBLEnabled  = 0;
+    uint32_t m_GIScene           = 0;
+    uint32_t m_DiffuseGIEnabled  = 0;
 
     static constexpr float kAreaLightPanelY = 1.445f;
 
@@ -794,8 +795,9 @@ void Sponza::RenderScene(
         Vector3  pointLightColor;
         Vector4  areaShadowParams;
         float    boxARoughness;
-        uint32_t giScene;   // 1 = Stage 11 GI: Box A becomes diffuse white
-        float    _pad[2];
+        uint32_t giScene;          // 1 = Stage 11 GI: Box A becomes diffuse white
+        uint32_t diffuseGIEnabled; // 1 = sample env cubemap as diffuse irradiance
+        float    _pad[1];
     } psConstants;
 
     psConstants.sunDirection = m_SunDirection;
@@ -818,7 +820,8 @@ void Sponza::RenderScene(
         0.02f, 2.5f, (float)m_PCSSLightSize, (float)m_PCSSMaxRadius);
     psConstants.boxARoughness     = (float)m_BoxARoughness;
     psConstants.giScene           = m_GIScene;
-    psConstants._pad[0] = psConstants._pad[1] = 0.0f;
+    psConstants.diffuseGIEnabled  = m_DiffuseGIEnabled;
+    psConstants._pad[0] = 0.0f;
 
     // Set the default state for command lists
     auto& pfnSetupGraphicsState = [&](void)

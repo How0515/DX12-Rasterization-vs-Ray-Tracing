@@ -274,7 +274,8 @@ const char* rayTracingModes[] = {
     "RT Refl4",         // 7 → RTM_SHADOWS (debug/legacy)
     "Raster+IBL",       // 8 → RTM_RASTER_GLOSSY
     "RT Glossy",        // 9 → RTM_GLOSSY
-    "RT GI"};           // 10 → RTM_GI_RT (1-bounce diffuse path tracing)
+    "RT GI",            // 10 → RTM_GI_RT (1-bounce diffuse path tracing)
+    "Raster GI"};       // 11 → RTM_GI_RASTER (diffuse env IBL approximation)
 enum RaytracingMode
 {
     RTM_RASTER,                  // 0: raster, no shadow
@@ -288,6 +289,7 @@ enum RaytracingMode
     RTM_RASTER_GLOSSY,           // 8: raster + shadow + GGX prefiltered IBL
     RTM_GLOSSY,                  // 9: RT GGX IS reflections at depth 1
     RTM_GI_RT,                   // 10: RT 1-bounce diffuse GI (cosine-weighted path tracing)
+    RTM_GI_RASTER,               // 11: Raster GI approximation via diffuse env cubemap IBL
 };
 EnumVar rayTracingMode("Application/Raytracing/RayTraceMode", RTM_OFF, _countof(rayTracingModes), rayTracingModes);
 const char* reflectionDepthLabels[] = { "0 - Off", "1", "2", "4" };
@@ -1125,7 +1127,13 @@ void D3D12RaytracingMiniEngineSample::Update( float deltaT )
         m_CameraPosArrayCurrentPosition = 11;
         SetCameraToPredefinedPosition(m_CameraPosArrayCurrentPosition);
     }
-    else if (GameInput::IsFirstPressed(GameInput::kKey_h)) { /* TODO: RT GI        */ }
+    else if (GameInput::IsFirstPressed(GameInput::kKey_h))
+    {
+        rayTracingMode  = RTM_GI_RASTER;
+        Sponza::m_GIScene = 1;
+        m_CameraPosArrayCurrentPosition = 11;
+        SetCameraToPredefinedPosition(m_CameraPosArrayCurrentPosition);
+    }
     else if (GameInput::IsFirstPressed(GameInput::kKey_j)) { /* TODO: RT GI+Denoise*/ }
     // --- Camera presets ---
     else if (GameInput::IsFirstPressed(GameInput::kKey_t))
@@ -1211,11 +1219,12 @@ void D3D12RaytracingMiniEngineSample::RenderScene(void)
         rayTracingMode == RTM_GLOSSY ||
         rayTracingMode == RTM_GI_RT;
 
-    // Shadow map: raster modes (RTM_OFF, RTM_SSR, RTM_RASTER_GLOSSY) need it; all RT modes skip it.
+    // Shadow map: raster modes (RTM_OFF, RTM_SSR, RTM_RASTER_GLOSSY, RTM_GI_RASTER) need it.
     const bool skipShadowMap =
         rayTracingMode != RTM_OFF &&
         rayTracingMode != RTM_SSR &&
-        rayTracingMode != RTM_RASTER_GLOSSY;
+        rayTracingMode != RTM_RASTER_GLOSSY &&
+        rayTracingMode != RTM_GI_RASTER;
 
     GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Render");
 
@@ -1228,8 +1237,9 @@ void D3D12RaytracingMiniEngineSample::RenderScene(void)
     static uint32_t s_frameCount = 0;
     g_dynamicCb.frameIndex = s_frameCount++;
 
-    Sponza::m_DebugView        = (uint32_t)(int)g_DebugView;
-    Sponza::m_GlossyIBLEnabled = (rayTracingMode == RTM_RASTER_GLOSSY) ? 1u : 0u;
+    Sponza::m_DebugView         = (uint32_t)(int)g_DebugView;
+    Sponza::m_GlossyIBLEnabled  = (rayTracingMode == RTM_RASTER_GLOSSY) ? 1u : 0u;
+    Sponza::m_DiffuseGIEnabled  = (rayTracingMode == RTM_GI_RASTER)     ? 1u : 0u;
     Sponza::RenderScene(gfxContext, m_Camera, viewport, scissor, skipDiffusePass, skipShadowMap);
 
     // Some systems generate a per-pixel velocity buffer to better track dynamic and skinned meshes.  Everything
@@ -1567,6 +1577,7 @@ void D3D12RaytracingMiniEngineSample::Raytrace(class GraphicsContext& gfxContext
     case RTM_RASTER:
     case RTM_OFF:
     case RTM_RASTER_GLOSSY:
+    case RTM_GI_RASTER:
         // Pure raster modes — no RT dispatch.
         break;
 

@@ -37,7 +37,8 @@ cbuffer PSConstants : register(b0)
     float4 AreaShadowParams; // x = near, y = far, z = light size in UV, w = max PCSS radius in UV
     float  BoxARoughness;   // runtime roughness for Box A (matID 104); Box B stays at 0.02
     uint   GIScene;         // 1 = Stage 11 GI mode: Box A becomes diffuse white
-    float2 _boxARPad;
+    uint   DiffuseGIEnabled; // 1 = sample env cubemap as diffuse irradiance (RTM_GI_RASTER)
+    float  _boxARPad;
 }
 
 StructuredBuffer<LightData> lightBuffer : register(t14);

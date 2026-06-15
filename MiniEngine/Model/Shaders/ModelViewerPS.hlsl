@@ -133,6 +133,16 @@ MRT main(VSOutput vsOutput)
         colorSum += F * envColor;
     }
 
+    // Diffuse GI (raster approximation): sample prefiltered env at max mip with the surface
+    // normal to approximate incident diffuse irradiance from all directions.
+    // Active in RTM_GI_RASTER (key H). No view-dependence, no color bleeding per-position —
+    // this is the raster baseline to compare against RT 1-bounce path tracing (key G).
+    if (DiffuseGIEnabled)
+    {
+        float3 irradiance = g_PrefilteredEnv.SampleLevel(cubeMapSampler, normal, 6.0f).rgb;
+        colorSum += diffuseContrib * irradiance;
+    }
+
     // Debug views
     if (DebugView == 1)      colorSum = float3(ao, ao, ao);
     else if (DebugView == 2) colorSum = float3(roughness, roughness, roughness);
