@@ -1016,6 +1016,16 @@ void Sponza::RenderScene(
                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, true);
 
             g_PrefilteredEnvReady = true;
+
+            // Wire prefiltered env into m_CommonTextures[0] (= t10) so ModelViewerPS
+            // can sample it as g_PrefilteredEnv for raster glossy IBL.
+            {
+                D3D12_CPU_DESCRIPTOR_HANDLE src  = g_PrefilteredEnvSRV;
+                D3D12_CPU_DESCRIPTOR_HANDLE dest = Renderer::m_CommonTextures;
+                uint32_t count = 1;
+                g_Device->CopyDescriptors(1, &dest, &count, 1, &src, &count,
+                    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            }
         }
 
         // Restore state for the main color pass that follows

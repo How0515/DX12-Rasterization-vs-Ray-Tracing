@@ -21,14 +21,13 @@ cbuffer MatCBV : register(b1)
     uint MaterialID;
 }
 
-Texture2D<float3> texDiffuse		: register(t0);
-Texture2D<float3> texORM			: register(t1);	// R=Occlusion, G=Roughness, B=Metallic
-Texture2D<float4> texEmissive		: register(t2);
-Texture2D<float3> texNormal			: register(t3);
-//Texture2D<float4> texLightmap		: register(t4);
-//Texture2D<float4> texReflection	: register(t5);
-Texture2D<float> texSSAO			: register(t12);
-Texture2D<float> texShadow			: register(t13);
+Texture2D<float3>   texDiffuse      : register(t0);
+Texture2D<float3>   texORM          : register(t1);   // R=Occlusion, G=Roughness, B=Metallic
+Texture2D<float4>   texEmissive     : register(t2);
+Texture2D<float3>   texNormal       : register(t3);
+TextureCube<float4> g_PrefilteredEnv : register(t10); // GGX prefiltered env map, 7 mip levels
+Texture2D<float>    texSSAO         : register(t12);
+Texture2D<float>    texShadow       : register(t13);
 
 struct VSOutput
 {
@@ -120,6 +119,17 @@ MRT main(VSOutput vsOutput)
             visibility);
     }
     colorSum += SAMPLE_TEX(texEmissive).rgb;
+
+    // Glossy IBL: GGX prefiltered environment map (split-sum approx, V=N, no BRDF LUT).
+    // mip 0 = roughness 0 (mirror); mip 6 = roughness 1 (diffuse blurred env).
+    {
+        float  NdotV     = saturate(dot(normal, V));
+        float3 R         = reflect(-V, normal);
+        float  mip       = roughness * 6.0f;
+        float3 envColor  = g_PrefilteredEnv.SampleLevel(cubeMapSampler, R, mip).rgb;
+        float3 F         = F_Schlick(NdotV, specularAlbedo);
+        colorSum += F * envColor;
+    }
 
     // Debug views
     if (DebugView == 1)      colorSum = float3(ao, ao, ao);
