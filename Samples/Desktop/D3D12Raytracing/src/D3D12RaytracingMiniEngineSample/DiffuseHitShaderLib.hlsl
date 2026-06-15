@@ -402,9 +402,9 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
             }
         }
 
-        // 1-bounce diffuse GI: trace cosine-weighted secondary ray on diffuse surfaces.
+        // Diffuse GI: trace cosine-weighted secondary ray; depth controlled by MaxRecursionDepth.
         // Estimator: albedo/pi * L_i * NdotL / (NdotL/pi) = albedo * L_i.
-        if (GIScene && payload.RecursionDepth == 0 && pm.metallic < 0.5f)
+        if (GIScene && MaxRecursionDepth > 0 && payload.RecursionDepth < MaxRecursionDepth && pm.metallic < 0.5f)
         {
             uint   seed  = MakeHaltonSeed(DispatchRaysIndex().xy, g_dynamic.frameIndex);
             float2 Xi    = Halton2D(seed);

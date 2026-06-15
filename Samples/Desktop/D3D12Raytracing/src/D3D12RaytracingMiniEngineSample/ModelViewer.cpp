@@ -1122,19 +1122,27 @@ void D3D12RaytracingMiniEngineSample::Update( float deltaT )
     // --- GI modes ---
     else if (GameInput::IsFirstPressed(GameInput::kKey_g))
     {
-        rayTracingMode  = RTM_GI_RT;
-        Sponza::m_GIScene = 1;
+        rayTracingMode      = RTM_GI_RT;
+        g_MaxRecursionDepth = 1;  // index 1 → 1 bounce
+        Sponza::m_GIScene   = 1;
         m_CameraPosArrayCurrentPosition = 11;
         SetCameraToPredefinedPosition(m_CameraPosArrayCurrentPosition);
     }
     else if (GameInput::IsFirstPressed(GameInput::kKey_h))
     {
-        rayTracingMode  = RTM_GI_RASTER;
+        rayTracingMode    = RTM_GI_RASTER;
         Sponza::m_GIScene = 1;
         m_CameraPosArrayCurrentPosition = 11;
         SetCameraToPredefinedPosition(m_CameraPosArrayCurrentPosition);
     }
-    else if (GameInput::IsFirstPressed(GameInput::kKey_j)) { /* TODO: RT GI+Denoise*/ }
+    else if (GameInput::IsFirstPressed(GameInput::kKey_j))
+    {
+        rayTracingMode      = RTM_GI_RT;
+        g_MaxRecursionDepth = 2;  // index 2 → 2 bounces
+        Sponza::m_GIScene   = 1;
+        m_CameraPosArrayCurrentPosition = 11;
+        SetCameraToPredefinedPosition(m_CameraPosArrayCurrentPosition);
+    }
     // --- Camera presets ---
     else if (GameInput::IsFirstPressed(GameInput::kKey_t))
     {
@@ -1458,7 +1466,7 @@ void D3D12RaytracingMiniEngineSample::RaytraceDiffuse(
                                         (rayTracingMode == RTM_GI_RT);
     static const UINT kReflDepthMap[] = { 0, 1, 2, 4 };
     hitShaderConstants.MaxRecursionDepth =
-        (rayTracingMode == RTM_REFLECTIONS || rayTracingMode == RTM_GLOSSY) ?
+        (rayTracingMode == RTM_REFLECTIONS || rayTracingMode == RTM_GLOSSY || rayTracingMode == RTM_GI_RT) ?
         kReflDepthMap[(int)g_MaxRecursionDepth] : 0;
     hitShaderConstants.pointLightPos   = Sponza::m_PointLightPos;
     hitShaderConstants.pointLightColor = Sponza::m_PointLightColor;
