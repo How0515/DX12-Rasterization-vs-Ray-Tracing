@@ -340,6 +340,8 @@ Phase 1의 목표는 래스터 근사의 실패 조건과 RT 질의의 차이를
 
 카메라 프리셋은 단순한 구도 저장 기능을 넘어 artifact 재현 장치로 구성하였다. 정면 비교, 그림자 접촉부, SSR screen edge, off-screen object, depth discontinuity, reflection depth, glossy reflection 및 GI color bleeding을 관찰하는 위치를 제공한다.
 
+Hard shadow 비교를 시작하기 전에는 기존 장면을 Cornell Box 비율에 가깝게 축소하고, 후면의 청색 표면을 백색으로 변경하였다. 그림자와 접촉부가 한 화면에 들어오는 고정 카메라를 구성하고, 발표용 출력 해상도와 기본 Raster 모드를 설정했으며, performance overlay를 비활성화하여 시각적 교란을 줄였다. 또한 shadow map 고유의 단일 깊이 비교 결과를 관찰하기 위해 초기 baseline에서는 9-tap PCF를 비활성화하고 단일 `SampleCmpLevelZero` 비교를 사용하였다.
+
 ### 4.2.3 발생 문제와 해결
 
 장면 구축 과정에서 Raster와 RT 결과의 seam, 벽-바닥 접촉부 누락 및 면 방향 차이가 발생하였다. 원인은 기하 범위가 정확히 맞닿을 때 발생하는 부동소수점 오차, shadow/ray epsilon, winding order 및 back-face culling 차이였다. 바닥 범위 확장, 벽과 박스의 미세한 하향 이동, raster/RT normal 동기화 및 적절한 bias 조정을 통해 문제를 완화하였다.
@@ -354,25 +356,42 @@ Phase 2에서는 한 표면이 광원에서 보이는지를 판정하는 가장 
 
 ### 4.3.2 Shadow Map 경로
 
-Shadow map 경로는 광원 시점에서 장면 depth를 생성하고, camera pass에서 world position을 light shadow space로 변환하여 저장된 depth와 비교한다. 이 방식은 한 번 생성한 shadow map을 많은 pixel이 재사용하므로 효율적이다.
+Shadow map 경로는 광원 중심을 shadow camera로 사용하여 장면을 먼저 rasterize하고, 광원에 가장 가까운 표면의 깊이를 shadow map에 기록한다. 본 엔진은 Reverse-Z를 사용하므로 depth test와 comparison sampler가 `GREATER_EQUAL`로 설정된다. 즉 더 큰 깊이값을 광원에 가까운 표면으로 판정하여 기록하며, camera pass에서는 현재 표면의 light-space 깊이를 shadow map의 값과 비교한다. 비교를 통과하면 빛을 받고, 저장된 표면보다 뒤에 있으면 다른 물체에 가려진 그림자로 판정한다.
 
-그러나 shadow map은 광원 공간의 제한된 texel로 장면을 표현한다. 해상도가 낮으면 그림자 경계가 계단 형태로 나타나며, 해상도가 높아져도 perspective/projective aliasing과 bias 문제는 남는다. Depth bias가 부족하면 자기 그림자에 의한 acne가 발생하고, 과도하면 접촉부의 그림자가 사라지거나 물체에서 분리된다.
+Shadow map 생성은 rasterization 규칙의 영향을 받는다. 초기 실험에서는 shadow pass의 back-face culling 때문에 일부 벽면과 절차적 표면이 shadow caster에서 제외되어 그림자가 누락되었다. Shadow pass에 `RasterizerShadowTwoSided`를 적용하여 culling을 제거한 뒤 벽면과 양면 geometry의 그림자가 복구되었다. 이는 camera에서 보이는 표면이라도 shadow camera의 rasterizer가 해당 면을 제거하면 shadow map에는 존재하지 않는다는 점을 보여준다.
+
+Depth bias는 Reverse-Z shadow map의 깊이를 이동시켜 자기 그림자를 억제하지만, 접촉 정확도와 self-shadowing 사이의 trade-off를 만든다. 초기 공통 shadow rasterizer 값인 `DepthBias=-100`, `SlopeScaledDepthBias=-1.5`에서는 그림자가 물체에서 떨어져 보이는 Peter Panning이 두드러졌다. Bias를 `-1`, `0.0`에 가깝게 줄이면 접촉 그림자는 개선되었지만 표면이 자기 자신을 가리는 Shadow Acne가 발생하였다. 여러 값을 비교한 결과 현재 실험 환경에서는 `DepthBias=-16`, `SlopeScaledDepthBias=0.0`을 중간값으로 사용하였다.
+
+Shadow map 해상도를 512로 낮춘 실험에서는 texel 경계가 드러났지만, 충분히 높은 2048×2048 해상도에서는 계단 현상보다 bias와 culling에 의한 접촉부 차이가 더 두드러졌다. 따라서 본 Phase의 핵심 관찰 대상은 해상도 자체보다 Peter Panning, Shadow Acne 및 shadow caster 누락으로 설정하였다.
 
 ### 4.3.3 Shadow Ray 경로
 
-Shadow ray 경로는 primary hit point에서 광원 위치까지 광선을 발사한다. 광원까지의 거리보다 가까운 교차점이 존재하면 그림자, 존재하지 않으면 조명으로 판정한다. Shadow map과 달리 texture resolution에 의해 경계가 양자화되지 않으며, 광원 투영 범위를 별도로 정의할 필요가 없다.
+Shadow ray 경로는 primary hit point에서 광원 위치까지 유한 길이의 광선을 발사한다. Payload의 `RayHitT`를 `FLT_MAX`로 초기화하고, closest-hit에서 `RayTCurrent()`를 기록한다. Trace 이후 `RayHitT < FLT_MAX`이면 광원까지 장애물이 존재하므로 그림자, 초기값이 유지되면 경로가 열려 있으므로 빛을 받는 것으로 판정한다. `RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH`를 사용하여 첫 장애물을 찾은 즉시 탐색을 종료하므로, hard shadow visibility에는 가장 가까운 표면의 전체 shading 결과가 필요하지 않다.
 
-RT에서도 자기 교차를 방지하기 위한 ray origin epsilon이 필요하다. Epsilon이 너무 크면 벽과 바닥 또는 물체 접촉부에 빛이 새는 흰 선이 발생할 수 있고, 너무 작으면 자기 교차가 발생한다. 이는 shadow map의 bias 문제와 유사하지만, RT에서는 world-space 거리로 제어된다는 차이가 있다.
+RT에서도 자기 교차를 방지하기 위한 ray origin offset과 `TMin` epsilon이 필요하다. 초기 `TMin=0.1`은 현재 표면 근처의 실제 occluder까지 건너뛰어 바닥-박스 및 바닥-벽 접촉부에 Peter Panning과 유사한 흰 틈을 만들었다. Epsilon을 `1e-5`로 줄이고 일반 mesh와 procedural geometry에 동일한 origin offset 및 `TMin` 기준을 적용한 뒤 접촉부 visibility가 복원되었다.
+
+Shadow ray의 epsilon은 shadow map의 depth comparison 오차를 보정하는 bias가 아니라, ray가 출발 표면과 즉시 재교차하는 것을 방지하기 위한 world-space 거리이다. 본 실험에서는 적절한 epsilon을 사용한 RT 결과에서 Shadow Acne가 관찰되지 않았지만, epsilon이 지나치게 작거나 normal과 geometry가 불일치하면 self-intersection에 의한 유사 artifact가 여전히 발생할 수 있다.
 
 ### 4.3.4 비교 결과 해석
 
-Shadow map의 오차는 “광원 시점 depth texture가 실제 visibility를 충분히 표현하지 못하는 것”에서 발생한다. Shadow ray는 visibility를 직접 질의하여 해상도 의존성을 제거하지만, ray epsilon과 traversal 비용을 추가한다.
+Hard shadow 실험에서 관찰한 단계별 현상은 다음과 같다.
 
-이 단계에서 중요한 결론은 RT가 bias 문제를 완전히 제거하는 것이 아니라는 점이다. 두 방식 모두 수치적 자기 교차를 회피해야 하며, 차이는 bias가 적용되는 표현과 공간에 있다.
+| 실험 조건 | 관찰 현상 | 파이프라인 원인 | 조치 |
+|---|---|---|---|
+| Shadow caster culling 활성 | 일부 벽면 그림자 누락 | shadow camera rasterization에서 면 제거 | shadow pass two-sided rasterizer 적용 |
+| Shadow map bias 과대 | Peter Panning, 접촉 그림자 분리 | 저장 depth가 receiver에서 과도하게 이동 | bias 감소 |
+| Shadow map bias 과소 | Shadow Acne | receiver와 caster의 제한된 depth 정밀도 및 자기 비교 | 중간 bias 설정 |
+| Shadow map 512×512 | 그림자 경계 texel화 | 제한된 light-space texture 해상도 | 해상도 증가 또는 filtering |
+| Shadow ray `TMin=0.1` | 접촉부 흰 틈과 occluder 누락 | ray 시작 구간이 실제 가림 물체를 건너뜀 | epsilon을 `1e-5`로 감소 |
+| Shadow ray epsilon 통일 | 바닥-벽 및 바닥-박스 접촉 복원 | mesh/procedural 경로가 동일한 visibility 규칙 사용 | 공통 origin offset 및 `TMin` 유지 |
+
+Shadow map의 오차는 광원 시점의 depth texture와 rasterizer 상태가 실제 visibility를 충분히 표현하지 못할 때 발생한다. 해상도, culling 및 bias가 모두 최종 판정에 관여하며, 특히 bias 조정에는 Peter Panning과 Shadow Acne 사이의 균형점이 필요했다. 반면 shadow ray는 실제 geometry와의 교차 여부를 질의하므로 texture 해상도와 shadow camera culling에 의존하지 않았고, 접촉부와 코너에서 더 직접적인 visibility를 제공하였다.
+
+그러나 RT가 수치 문제를 완전히 제거하는 것은 아니다. Shadow map의 핵심 조정값이 depth bias라면 shadow ray의 핵심 조정값은 world-space epsilon이다. 두 값 모두 자기 교차를 피하기 위해 사용되지만, shadow map bias는 저장·비교되는 깊이를 이동시키며 shadow ray epsilon은 ray의 유효 시작 구간을 이동시킨다는 차이가 있다.
 
 ### 4.3.5 결과 작성용 문장
 
-> Shadow map은 제한된 광원 공간 depth texture를 재사용함으로써 높은 효율을 제공하였으나, 해상도와 depth bias에 따라 경계 aliasing 및 접촉부 분리 현상이 발생하였다. Shadow ray는 표면과 광원 사이의 실제 교차 여부를 검사하여 이러한 texture-space 오차를 줄였으나, ray origin epsilon 설정에 따라 접촉부 light leak가 발생할 수 있었다.
+> Shadow map은 광원 시점의 depth texture를 재사용하여 효율적으로 hard shadow를 생성했지만, shadow caster culling과 depth bias에 따라 그림자 누락, Peter Panning 및 Shadow Acne가 발생하였다. Shadow ray는 hit point와 광원 사이의 실제 geometry 교차를 검사하여 접촉부 visibility를 직접 복원하였으며, 적절한 `1e-5` epsilon 조건에서는 본 실험의 Shadow Acne가 관찰되지 않았다. 다만 과도한 epsilon은 가까운 occluder를 건너뛰어 Peter Panning과 유사한 흰 틈을 만들 수 있으므로, RT 역시 수치적 시작점 조정이 필요하였다.
 
 ## 4.4 Phase 3. Visibility(area)/Soft Shadow: PCSS vs Area Light Sampling
 
@@ -730,7 +749,7 @@ RT 1-SPP GI buffer
 
 1. 전체 시스템 구조도: Raster pipeline, DXR pipeline, 공유 scene/material/light data
 2. Cornell 스타일 실험 장면과 오브젝트 배치 Top View
-3. Phase 2: Shadow map 해상도 및 bias 변화 대 shadow ray
+3. Phase 2: Shadow caster culling, bias 변화 및 shadow ray TMin 접촉부 비교
 4. Phase 3: PCSS over-blur 대 64-ray area-light soft shadow
 5. Phase 5: SSR screen-edge/off-screen/depth-discontinuity 대 reflection ray
 6. Phase 5: Reflection depth 1/2/4 비교
@@ -755,7 +774,11 @@ RT 1-SPP GI buffer
 |---|---|---|---|---|
 | Raster Shadow | Shadow map 512 | 경계 aliasing | 제한된 광원 depth texture 해상도 | 해상도 의존적 오차 |
 | Raster Shadow | Shadow map 2048 | 경계 개선 | 더 조밀한 depth sample | 품질은 향상되지만 구조적 근사는 유지 |
+| Raster Shadow | shadow caster culling 활성 | 일부 벽면 그림자 누락 | shadow camera rasterization에서 면 제거 | two-sided shadow pass 필요 |
+| Raster Shadow | bias 과대/과소 | Peter Panning / Shadow Acne | Reverse-Z depth 이동과 자기 비교 | 접촉 정확도와 self-shadowing 사이 조정 필요 |
 | RT Shadow | 1 ray | hard shadow | 광원 중심 한 점에 대한 visibility query | 정확한 접촉부, 면광원 penumbra 없음 |
+| RT Shadow | `TMin=0.1` | 접촉부 흰 틈 | 가까운 occluder를 ray 시작 구간에서 건너뜀 | 작은 공통 epsilon 필요 |
+| RT Shadow | epsilon `1e-5` | 접촉부 visibility 복원 | 실제 geometry 교차 검사 | 본 장면에서 안정적인 hard shadow |
 | RT Shadow | 64 rays | soft shadow | 면광원 영역에 대한 다중 visibility query | 위치별 penumbra 표현 |
 | Raster SSR | fixed settings | off-screen 누락 | 현재 화면 color/depth만 조회 | 화면 밖 정보 복원 불가 |
 | RT Reflection | depth 1/2 | 단일/다중 반사 | TLAS 대상 월드 공간 재귀 ray query | 화면 밖 및 다중 반사 표현 |
